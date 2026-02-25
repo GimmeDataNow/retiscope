@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup, For } from "solid-js";
+import { createSignal, onMount, onCleanup, createEffect } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -6,103 +6,90 @@ function Logview() {
   const [logs, setLogs] = createSignal([]);
   const [isRunning, setIsRunning] = createSignal(false);
   const [userInput, setUserInput] = createSignal("--cli");
-  let unlistenFunc;
+  
+  let logContainerRef; // Reference for auto-scrolling
+  const MAX_LOGS = 500; // Memory limit
 
-  const startProcess = async () => {
-    if (!userInput()) return;
-    
-    setLogs([]);
-    try {
-      // Set state BEFORE the await to prevent double-starts from rapid clicks
-      setIsRunning(true); 
-      await invoke("start_logging_process", { commandOptions: userInput() });
-    } catch (e) {
-      setLogs((p) => [...p, `Error: ${e}`]);
-      setIsRunning(false);
+  // AUTO-SCROLL LOGIC
+  createEffect(() => {
+    logs(); // Track the logs signal
+    if (logContainerRef) {
+      logContainerRef.scrollTop = logContainerRef.scrollHeight;
     }
-  };
-
-  const stopProcess = async () => {
-    try {
-      await invoke("stop_logging_process");
-    } catch (e) {
-      console.error("Stop error:", e);
-    } finally {
-      // Always flip the UI state back, even if Rust says "No process was running"
-      setIsRunning(false);
-    }
-  };
-
-  onMount(async () => {
-    // Correctly await the unlisten function
-    const unlisten = await listen("process-log", (event) => {
-      setLogs((prev) => [...prev, event.payload]);
-    });
-    unlistenFunc = unlisten;
   });
 
-  onCleanup(() => {
-    if (unlistenFunc) unlistenFunc();
-    stopProcess();
+  onMount(async () => {
+    const unlisten = await listen("process-log", (event) => {
+      setLogs((prev) => {
+        const newLogs = [...prev, event.payload];
+        // Keep only the last MAX_LOGS entries
+        return newLogs.slice(-MAX_LOGS);
+      });
+    });
+
+    onCleanup(() => {
+      unlisten();
+    });
   });
 
   const handleButtonClick = async (e) => {
     e.preventDefault();
-    
-    const currentlyRunning = isRunning();
-    console.log("%c Button Clicked!", "color: yellow; font-weight: bold;");
-    console.log("Current Signal State (isRunning):", currentlyRunning);
-  
-    if (currentlyRunning) {
-      console.log("Action: Calling STOP");
-      // Force the signal to false immediately to update UI
-      setIsRunning(false); 
-      try {
-        await invoke("stop_logging_process");
-      } catch (err) {
-        console.error("Stop Command Failed:", err);
-      }
+    if (isRunning()) {
+      setIsRunning(false);
+      await invoke("stop_logging_process").catch(console.error);
     } else {
-      console.log("Action: Calling START");
+      setLogs([]); // Clear logs on new run
       setIsRunning(true);
       try {
         await invoke("start_logging_process", { commandOptions: userInput() });
-      } catch (err) {
-        console.error("Start Command Failed:", err);
+      } catch (e) {
         setIsRunning(false);
+        setLogs([`Error: ${e}`]);
       }
     }
   };
-  
+
   return (
     <div style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column" }}>
+      {/* Header / Controls */}
       <div style={{ padding: "1rem", "border-bottom": "1px solid #444", display: "flex", gap: "10px" }}>
         <input 
           type="text" 
-          disabled={isRunning()} // Prevent changing args while running
           value={userInput()} 
           onInput={(e) => setUserInput(e.target.value)}
-          placeholder="Enter command"
-          style={{ flex: 1, padding: "8px", background: isRunning() ? "#222" : "#333", color: "white", border: "1px solid #555" }}
+          style={{ flex: 1, padding: "8px", background: "#333", color: "white", border: "1px solid #555" }}
         />
-        
         <button 
-          type="button"
           onClick={handleButtonClick}
           style={{ 
             background: isRunning() ? "#ff4d4d" : "#4CAF50", 
-            color: "white", border: "none", padding: "8px 20px", cursor: "pointer",
-            "font-weight": "bold"
+            color: "white", border: "none", padding: "8px 20px", cursor: "pointer" 
           }}
         >
-          {isRunning() ? "STOP PROCESS" : "RUN COMMAND"}
+          {isRunning() ? "Stop" : "Run"}
         </button>
       </div>
 
-      <div style={{ flex: 1, "overflow-y": "auto", padding: "1rem", "font-family": "monospace", "white-space": "pre-wrap" }}>
+      {/* Log Container */}
+      <div 
+        ref={logContainerRef} // Link the ref here
+        style={{ 
+          flex: 1, 
+          "overflow-y": "auto", 
+          padding: "1rem", 
+          "font-family": "'Cascadia Code', 'Fira Code', monospace", 
+          "white-space": "pre-wrap",
+          "scroll-behavior": "smooth" // Optional: makes scrolling look nice
+        }}
+      >
         <For each={logs()}>
           {(log) => (
-            <div style={{ color: log.startsWith("[ERR]") ? "#f44" : "#d4d4d4", "border-bottom": "1px solid #2a2a2a" }}>
+            <div style={{ 
+              "border-left": "2px solid #333", 
+              "padding-left": "8px", 
+              "margin-bottom": "2px",
+              "font-size": "13px"
+            }}>
               {log}
             </div>
           )}
