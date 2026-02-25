@@ -16,6 +16,39 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 - [ ] MTU / bandwith / RSSI display
 - [ ] Identity resolution mapping 
 - [ ] Node distance + relay count
+- [ ] Edge confidence score
+- [ ] Time decay
+- [ ] Network map snapshots (both as json and as an image)
+
+### Visualization
+
+- [ ] Node clustering
+- [ ] Transport grouping
+- [ ] Edge wighting (quality/bandwith)
+- [ ] Time decay (makes nodes fade)
+- [ ] Layout stabilization
+- [ ] Known identities
+- [ ] Trust relationships
+- [ ] Announce propagation (could be visually overbearing)
+- [ ] Unknown nodes vs known nodes
+- [ ] Get data from many servers
+- [ ] Node aging
+- [ ] clustering
+- [ ] filtering
+- [ ] scope zooming
+- [ ] Observed vs inferred distinction, Confidence weighting
+
+### Animations
+- [ ] Hop sequence
+- [ ] Time
+- [ ] Retransmission (might be difficult)
+- [ ] interface switches
+
+### Telemetry Model
+- Observed link (direct link established)
+- Inferred route (via routing table)
+- Announced presence (identity seen)
+
 
 ## Libraries and other utilites
 
