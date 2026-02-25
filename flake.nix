@@ -27,6 +27,9 @@
           pango
           webkitgtk_4_1
           openssl
+
+          # needed for reticulum-rs
+          protobuf
         ];
       in
       {
