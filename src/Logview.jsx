@@ -4,43 +4,57 @@ import { listen } from "@tauri-apps/api/event";
 
 function Logview() {
   const [logs, setLogs] = createSignal([]);
-  let unlistenFunc; // Store the function directly
+  const [isRunning, setIsRunning] = createSignal(false);
+  let unlistenFunc;
+
+  const startProcess = async () => {
+    setLogs([]); // Clear old logs
+    setIsRunning(true);
+    await invoke("start_logging_process");
+  };
+
+  const stopProcess = async () => {
+    try {
+      await invoke("stop_logging_process");
+      setIsRunning(false);
+      setLogs((prev) => [...prev, "--- PROCESS TERMINATED BY USER ---"]);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   onMount(async () => {
-    // 1. Setup Listener
-    // We assign the resolved promise to our variable
     unlistenFunc = await listen("process-log", (event) => {
       setLogs((prev) => [...prev, event.payload]);
     });
-
-    // 2. Start the process
-    try {
-      await invoke("start_logging_process");
-    } catch (e) {
-      console.error("Failed to start process:", e);
-    }
+    // Auto-start on mount
+    startProcess();
   });
 
   onCleanup(() => {
-    // 3. Clean up the listener to prevent memory leaks
-    if (unlistenFunc) {
-      unlistenFunc();
-    }
+    if (unlistenFunc) unlistenFunc();
+    stopProcess(); // Optional: Kill process when user leaves the page
   });
 
   return (
-    <div style={{ 
-      background: "#1e1e1e", 
-      color: "#d4d4d4", 
-      padding: "1rem", 
-      height: "100vh", 
-      "font-family": "monospace",
-      "overflow-y": "auto" 
-    }}>
-      <h3>Process Logs:</h3>
-      <div class="log-container">
+    <div style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column" }}>
+      <div style={{ padding: "1rem", "border-bottom": "1px solid #444", display: "flex", gap: "10px", "align-items": "center" }}>
+        <h3 style={{ margin: 0 }}>Process Logs</h3>
+        
+        {isRunning() ? (
+          <button onClick={stopProcess} style={{ background: "#ff4d4d", color: "white", border: "none", padding: "5px 15px", cursor: "pointer" }}>
+            Stop Process
+          </button>
+        ) : (
+          <button onClick={startProcess} style={{ background: "#4CAF50", color: "white", border: "none", padding: "5px 15px", cursor: "pointer" }}>
+            Restart Process
+          </button>
+        )}
+      </div>
+
+      <div style={{ flex: 1, "overflow-y": "auto", padding: "1rem", "font-family": "monospace" }}>
         <For each={logs()}>
-          {(log) => <div style={{ "border-bottom": "1px solid #333" }}>{log}</div>}
+          {(log) => <div style={{ "margin-bottom": "2px" }}>{log}</div>}
         </For>
       </div>
     </div>
