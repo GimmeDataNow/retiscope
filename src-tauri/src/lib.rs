@@ -1,3 +1,4 @@
+use log::info;
 use std::env;
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter, State};
@@ -14,6 +15,7 @@ async fn start_logging_process(
     state: State<'_, ProcessState>,
     command_options: String,
 ) -> Result<(), String> {
+    info!("Starting command");
     // 1. Kill existing process if one is already running
     let mut lock = state.0.lock().await;
     if let Some(mut old_child) = lock.take() {
@@ -51,6 +53,7 @@ async fn start_logging_process(
 
 #[tauri::command]
 async fn stop_logging_process(state: State<'_, ProcessState>) -> Result<(), String> {
+    info!("Stopped command");
     let mut lock = state.0.lock().await;
     if let Some(mut child) = lock.take() {
         child.kill().await.map_err(|e| e.to_string())?;

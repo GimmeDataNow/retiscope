@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::{thread::sleep, time};
+
 use clap::Parser;
 use log::{self, info};
 
@@ -18,6 +20,10 @@ fn main() {
     let args = Args::parse();
     if args.cli {
         info!("CLI started");
+        loop {
+            sleep(time::Duration::from_secs(1));
+            info!("wow");
+        }
     } else {
         info!("GUI started");
         retiscope_lib::run()
