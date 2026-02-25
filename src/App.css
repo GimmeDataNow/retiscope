@@ -114,3 +114,27 @@ button {
     background-color: #0f0f0f69;
   }
 }
+
+.log-container {
+  background-color: #0d1117; /* GitHub Dark theme background */
+  color: #c9d1d9;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 13px;
+  height: 400px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  border-bottom: 1px solid #161b22;
+}
+
+/* Highlighting Classes */
+.log-info { color: #58a6ff; font-weight: bold; }   /* Blue */
+.log-error { color: #f85149; font-weight: bold; }  /* Red */
+.log-warn { color: #d29922; font-weight: bold; }   /* Orange/Yellow */
+.log-time { color: #8b949e; margin-right: 5px; }   /* Gray */

@@ -1,3 +1,4 @@
+import { A } from "@solidjs/router";
 import { createSignal } from "solid-js";
 import logo from "./assets/logo.svg";
 import { invoke } from "@tauri-apps/api/core";
@@ -15,6 +16,7 @@ function App() {
   return (
     <main class="container">
       <h1>Welcome to Tauri + Solid</h1>
+      <A href="logview">hello</A>
 
       <div class="row">
         <a href="https://vite.dev" target="_blank">
@@ -27,23 +29,6 @@ function App() {
           <img src={logo} class="logo solid" alt="Solid logo" />
         </a>
       </div>
-      <p>Click on the Tauri, Vite, and Solid logos to learn more.</p>
-
-      <form
-        class="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg()}</p>
     </main>
   );
 }
