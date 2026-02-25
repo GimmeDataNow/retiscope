@@ -8,6 +8,7 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 
 ### General overview
 
+- [ ] GUI with server and router
 - [ ] Live topology graph
 - [ ] Route table visualization
 - [ ] Per-hop metrics
@@ -19,6 +20,7 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 - [ ] Edge confidence score
 - [ ] Time decay
 - [ ] Network map snapshots (both as json and as an image)
+- [ ] Save known network map into a database
 
 ### Visualization
 
@@ -33,10 +35,12 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 - [ ] Unknown nodes vs known nodes
 - [ ] Get data from many servers
 - [ ] Node aging
-- [ ] clustering
-- [ ] filtering
-- [ ] scope zooming
+- [ ] Clustering
+- [ ] Filtering
+- [ ] Scope zooming
 - [ ] Observed vs inferred distinction, Confidence weighting
+- [ ] Path trace mode (Select node A → node B, Show inferred path + metrics.)
+- [ ] Partition Detection (might be difficult)
 
 ### Animations
 - [ ] Hop sequence
