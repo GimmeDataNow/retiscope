@@ -1,9 +1,25 @@
-# Tauri + Solid
+# Retiscope
 
-This template should help get you started developing with Tauri and Solid in Vite.
+Retiscope is a reticulum network visualizer.
+
+Retiscope supports (or will support) multi node data retreival for viewing large networks. 
+
+## Features / Planned Features
+
+### General overview
+
+- [ ] Live topology graph
+- [ ] Route table visualization
+- [ ] Per-hop metrics
+- [ ] Packet tracing
+- [ ] Interface state
+- [ ] MTU / bandwith / RSSI display
+- [ ] Identity resolution mapping 
+- [ ] Node distance + relay count
 
 ## Libraries and other utilites
 
+- Reticulum - https://github.com/BeechatNetworkSystemsLtd/Reticulum-rs.git
 - Node visualization - @dschz/solid-g6
 
 ## Output of the setup
