@@ -1,6 +1,25 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use clap::Parser;
+use log::{self, info};
+
+#[derive(Parser)]
+#[command(name = "retiscope")]
+#[command(about = "A Reticulum Network Explorer", long_about = None)]
+#[command(version)]
+struct Args {
+    /// Launch in CLI mode instead of GUI
+    #[arg(long)]
+    cli: bool,
+}
+
 fn main() {
-    retiscope_lib::run()
+    let args = Args::parse();
+    if args.cli {
+        info!("CLI started");
+    } else {
+        info!("GUI started");
+        retiscope_lib::run()
+    }
 }
