@@ -53,15 +53,17 @@ body {
 
 .content-area {
   flex: 1;
+  display: flex;
   /* padding: 2rem; */
   overflow-y: auto;
   background-color: #ffffff;
+  align-items: stretch;
 }
 
 /* For dark mode support in Tauri */
-@media (prefers-color-scheme: dark) {
-  .content-area {
-    background-color: #242424;
-    color: white;
-  }
-}
+/* @media (prefers-color-scheme: dark) { */
+  /* .content-area { */
+    /* background-color: #242424; */
+    /* color: white; */
+  /* } */
+/* } */

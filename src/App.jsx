@@ -15,7 +15,7 @@ function App() {
   }
 
   return (
-    <div class="container" style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column" }}>
+    <div class="container" style={{  }}>
       <h1>Retiscope</h1>
       The Reticulum network visualizer
       <A href="logview">hello</A>
