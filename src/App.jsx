@@ -15,8 +15,9 @@ function App() {
   }
 
   return (
-    <div class="container">
-      <h1>Welcome to Tauri + Solid</h1>
+    <div class="container" style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column" }}>
+      <h1>Retiscope</h1>
+      The Reticulum network visualizer
       <A href="logview">hello</A>
     </div>
   );

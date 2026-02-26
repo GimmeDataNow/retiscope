@@ -1,0 +1,67 @@
+/* Sidebar.css */
+body {
+  margin: 0;
+}
+.layout-wrapper {
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+}
+
+
+.title-wrapper {
+  display: flex;
+  align-items: center;
+  /* justify-content: center; */
+  /* color: red; */
+  height: 60px;
+  /* height: 40px; */
+}
+
+.menu {
+  width: 240px;
+  background-color: #1a1a1a; /* Dark theme example */
+  color: white;
+  /* padding: 1.5rem; */
+  /* border-right: 1px solid #333; */
+  display: flex;
+  flex-direction: column;
+  /* gap: 1rem; */
+}
+
+.menu a {
+  color: white;
+  /* padding-left: 20px; */
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+  padding-left: 1rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+
+  /* background-color: rgba(255, 255, 255, 0.1); */
+  border-radius: 8px 8px 8px 8px;
+  /* color: red; */
+}
+
+.menu a:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.menu a.active {
+  background-color: #242424;
+}
+
+
+.content-area {
+  flex: 1;
+  /* padding: 2rem; */
+  overflow-y: auto;
+  background-color: #ffffff;
+}
+
+/* For dark mode support in Tauri */
+@media (prefers-color-scheme: dark) {
+  .content-area {
+    background-color: #242424;
+    color: white;
+  }
+}
