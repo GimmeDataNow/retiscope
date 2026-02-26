@@ -16,3 +16,8 @@ send this to a database
 
 This might need to support configuration for remote databases.
 This might require to 'diff' the state. It would be best to do that with rayon/par_iter
+
+500 elements might equate to ~55kb of data (sync every X seconds)
+iter over the data. batch commit
+#[serde(with = "serde_bytes")] might be need for binary data.
+if the data is in binary format then manual search might be possible
