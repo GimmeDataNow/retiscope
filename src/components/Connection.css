@@ -1,0 +1,82 @@
+.connection-layout-wrapper {
+  display: flex;
+  flex: 1;
+  background-color: #1a1a1a;
+  color: white;
+}
+.connection-layout-wrapper-cosmetic {
+  flex: 1;
+  background-color: #242424;
+  border-radius: 16px 0px 0px 16px;
+
+  /*Make stuff stay away from the border radius*/
+  padding: 16px;
+}
+
+.connections {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  gap: 1rem;
+  padding: 1rem;
+  background-color: #1a1a1a;
+  border-radius: 8px;
+}
+
+.connections-item {
+  display: flex;
+  background-color: #242424;
+  padding: 0.5rem 1rem 0.5rem 1rem;
+  border-radius: 8px;
+}
+
+.connection-settings {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #1a1a1a;
+  border-radius: 8px;
+}
+
+.connection-logs {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #1a1a1a;
+  border-radius: 8px;
+}
+
+.connection-widgets {
+  display: flex;
+  flex-direction: column;
+}
+
+.connection-widget-info {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.connection-controls {
+  display:flex;
+  flex: 1;
+  justify-content: flex-end; 
+  gap: 1rem;
+}
+.connection-buttons {
+  border:none;
+  color: white;
+  background-color: #242424;
+} 
+
+.connection-logs-bar {
+  display: flex;
+  flex-direction: row;
+  gap: 5rem;
+}

@@ -50,7 +50,7 @@ function Logview() {
   };
 
   return (
-    <div style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column" }}>
+    <div style={{ background: "#1e1e1e", color: "#d4d4d4", height: "100vh", display: "flex", "flex-direction": "column", flex: 1 }}>
       {/* Header / Controls */}
       <div style={{ padding: "1rem", "border-bottom": "1px solid #444", display: "flex", gap: "10px" }}>
         <input 
