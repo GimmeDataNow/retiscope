@@ -1,7 +1,11 @@
 // components/Sidebar.jsx
 import "./Connection.css"
+import { useGlobal } from "../store/GlobalContext";
+
 
 export function Connection(props) {
+  const [state, actions] = useGlobal();
+
   return (
     <div class="connection">
       

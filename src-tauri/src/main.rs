@@ -18,11 +18,16 @@ struct Args {
     cli: bool,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
+    tauri::async_runtime::set(tokio::runtime::Handle::current());
+
     let args = Args::parse();
     if args.cli {
         info!("CLI started");
-        cli::cli_init();
+        // cli::cli_init();
+        cli::db_init().await;
+
         // loop {
         //     sleep(time::Duration::from_secs(1));
         //     info!("wow");

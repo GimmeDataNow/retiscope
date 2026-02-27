@@ -26,8 +26,12 @@
 .connections-item {
   display: flex;
   background-color: #242424;
+  color: white;
   padding: 0.5rem 1rem 0.5rem 1rem;
   border-radius: 8px;
+}
+a.active {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .connection-settings {

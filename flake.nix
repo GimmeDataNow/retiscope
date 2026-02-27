@@ -11,7 +11,10 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs { inherit system overlays; };
+        pkgs = import nixpkgs {
+          inherit system overlays;
+          config.allowUnfree = true;
+        };
 
         # Grouping the specific libraries from your working dep.nix
         libs = with pkgs; [
@@ -30,6 +33,11 @@
 
           # needed for reticulum-rs
           protobuf
+
+          libclang
+
+          # surrealdb
+          # surrealdb
         ];
       in
       {
@@ -54,10 +62,12 @@
             # Potential fix for the "White Screen" / Network issues
             export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules/"
             
+            # export CPATH="${pkgs.glibc.dev}/include"
             # Ensure Rust can find the libraries at compile/link time
             export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH
             
             echo "Retiscope development environment is active"
+            alias "s=surreal start -u a -p a surrealkv://$HOME/.cache/retiscope/surreal.db"
           '';
         };
       });
