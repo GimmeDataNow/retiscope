@@ -4969,7 +4969,7 @@ dependencies = [
 [[package]]
 name = "reticulum"
 version = "0.1.0"
-source = "git+https://github.com/BeechatNetworkSystemsLtd/Reticulum-rs?rev=6203b6b8334cca39410c5a1b9b226d31a8acf727#6203b6b8334cca39410c5a1b9b226d31a8acf727"
+source = "git+https://github.com/GimmeDataNow/Reticulum-rs?rev=aab313984bfbed6e9e82f997f7281c2f36a39676#aab313984bfbed6e9e82f997f7281c2f36a39676"
 dependencies = [
  "aes",
  "cbc",
@@ -5003,6 +5003,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surrealdb",
+ "surrealdb-types",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

@@ -26,7 +26,8 @@ async fn main() {
     if args.cli {
         info!("CLI started");
         // cli::cli_init();
-        cli::db_init().await;
+        // cli::db_init().await;
+        cli::router_init().await;
 
         // loop {
         //     sleep(time::Duration::from_secs(1));

@@ -96,6 +96,7 @@ struct AnnounceCache {
 
 
 surreal start --allow-experimental record_references
+surreal start --user a --pass a --bind 0.0.0.0:8000 rocksdb:$HOME/.local/share/retiscope/surreal/
 might be the solution
 
 ON DELETE CASCADE
