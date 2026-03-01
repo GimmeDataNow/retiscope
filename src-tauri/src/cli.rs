@@ -2,12 +2,15 @@ use log::{self, info, trace};
 
 use rand_core::OsRng;
 use reticulum::destination::{DestinationName, SingleInputDestination};
+use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
 
 use reticulum::iface::tcp_server::TcpServer;
+use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::time;
 
 use surrealdb::engine::remote::ws::{Client, Ws, Wss};
@@ -27,9 +30,6 @@ pub async fn db_init() -> Surreal<Client> {
     .unwrap();
     db.use_ns("main").use_db("main").await.unwrap();
     {
-        // db.query("DEFINE FIELD timestamp ON TABLE path_table;")
-        //     .await
-        //     .unwrap();
         let _ = db
             .query(
                 r#"
@@ -48,7 +48,7 @@ pub async fn db_init() -> Surreal<Client> {
 
 pub fn db_serve() {}
 
-#[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
 pub struct PathEntryWrapper {
     id: RecordId,
     hops: u8,
@@ -60,8 +60,6 @@ pub async fn sync_path_table(
     db: &Surreal<Client>,
     entries: Vec<PathEntryWrapper>,
 ) -> surrealdb::Result<()> {
-    // Because PathEntryWrapper now implements SurrealValue,
-    // Vec<PathEntryWrapper> automatically satisfies the bound for .bind()
     db.query(
         r#"
         INSERT INTO path_table $data 
@@ -75,7 +73,73 @@ pub async fn sync_path_table(
     Ok(())
 }
 
+pub fn add_transport_routes<P>(transport: Transport, path: P)
+where
+    P: AsRef<std::path::Path>,
+{
+    log::info!("Add transport Nodes");
+
+    let config = std::fs::read_to_string(path);
+}
+
 pub async fn router_init() {
+    log::info!(">>> Reticulum Router + Path Monitor <<<");
+
+    log::info!("DB init");
+    let db = db_init().await;
+
+    // 1. Initialize Transport
+    let transport = Transport::new(TransportConfig::new(
+        "router-node",
+        &PrivateIdentity::new_from_rand(OsRng),
+        true,
+    ));
+
+    // TCP Server
+    let _ = transport.iface_manager().lock().await.spawn(
+        TcpServer::new("0.0.0.0:4242", transport.iface_manager()),
+        TcpServer::spawn,
+    );
+
+    // TCP Clients (Hubs)
+    let hub_1 = "202.61.243.41:4965";
+    let hub_2 = "reticulum.betweentheborders.com:4242";
+    let hub_3 = "dublin.connect.reticulum.network:4965";
+    let hub_4 = "202.61.243.41:4965";
+    let hub_5 = "193.26.158.230:4965";
+
+    for target in [hub_1, hub_2, hub_3, hub_4, hub_5] {
+        let addr = transport
+            .iface_manager()
+            .lock()
+            .await
+            .spawn(TcpClient::new(target), TcpClient::spawn);
+        log::trace!(
+            "Started Client interface {} to {}",
+            addr.to_hex_string(),
+            target
+        );
+    }
+
+    let mut path_rx = transport.recv_path_events().await;
+    log::warn!("monitoring: subscribed to path events");
+    tokio::spawn(async move {
+        log::warn!("monitoring: task started");
+        loop {
+            log::warn!("monitoring: waiting for event");
+            match path_rx.recv().await {
+                Ok(event) => log::warn!("monitoring: got event!"),
+                Err(e) => log::warn!("monitoring: error {:?}", e),
+            }
+        }
+    });
+
+    log::info!("Router is active. Press Ctrl+C to shut down.");
+    let _ = tokio::signal::ctrl_c().await;
+    log::info!("Shutting down...");
+}
+
+pub async fn router_init_old() {
     log::info!(">>> Reticulum Router + Path Monitor <<<");
 
     log::info!("DB init");
@@ -109,43 +173,31 @@ pub async fn router_init() {
     );
     log::trace!("Started Client interface {}", addr.to_hex_string());
 
-    // 3. Spawn the Monitoring Task
+    let mut path_rx = transport.subscribe_path_table();
     tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(5));
-
+        let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
         loop {
-            interval.tick().await;
-
-            // Acquire the lock to the TransportHandler
-            let handler = handler_link.lock().await;
-
-            let path_map = handler.path_table_map_ref();
-
-            if path_map.is_empty() {
-                log::info!("No paths discovered yet.");
-            } else {
-                let entries: Vec<PathEntryWrapper> = path_map
-                    .iter()
-                    .map(|(hash, entry)| {
+            match path_rx.recv().await {
+                Ok(event) => {
+                    let hash = event.destination.to_hex_string();
+                    local_path_map.insert(
+                        hash.clone(),
                         PathEntryWrapper {
-                            // Construct the record ID manually: "table_name:identifier"
-                            id: RecordId::parse_simple(&format!(
-                                "path_table:{}",
-                                hash.to_hex_string()
-                            ))
-                            .unwrap(),
-                            received_from: entry.received_from.clone().to_hex_string(),
-                            hops: entry.hops,
-                            iface: entry.iface.clone().to_hex_string(),
-                        }
-                    })
-                    .collect();
-                let a = sync_path_table(&db, entries).await;
-                log::error!("{:?}", a);
+                            id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
+                            received_from: event.received_from.map(|a| a.to_hex_string()),
+                            hops: event.hops,
+                            iface: event.iface.to_hex_string(),
+                        },
+                    );
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("Lagged, skipped {} path events", n);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    log::error!("Path event channel closed");
+                    return;
+                }
             }
-
-            // Drop the lock explicitly if you have more work in the loop
-            drop(handler);
         }
     });
 
