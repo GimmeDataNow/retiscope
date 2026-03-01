@@ -4995,6 +4995,7 @@ dependencies = [
 name = "retiscope"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "log 0.1.0",
  "rand_core 0.6.4",

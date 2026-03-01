@@ -1,19 +1,14 @@
-use log::{self, info, trace};
+use log::{self};
 
 use rand_core::OsRng;
-use reticulum::destination::{DestinationName, SingleInputDestination};
-use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
 
 use reticulum::iface::tcp_server::TcpServer;
 use std::collections::HashMap;
-use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::time;
 
-use surrealdb::engine::remote::ws::{Client, Ws, Wss};
+use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::{self, Surreal};
 use surrealdb_types::{RecordId, SurrealValue};
@@ -36,8 +31,9 @@ pub async fn db_init() -> Surreal<Client> {
                     DEFINE TABLE path_table SCHEMAFULL;
 
                     DEFINE FIELD hops          ON TABLE path_table TYPE int;
-                    DEFINE FIELD iface         ON TABLE path_table TYPE option<string>;
-                    DEFINE FIELD received_from ON TABLE path_table TYPE string;
+                    DEFINE FIELD iface         ON TABLE path_table TYPE string;
+                    DEFINE FIELD received_from ON TABLE path_table TYPE option<string>;
+                    DEFINE FIELD last_seen     ON TABLE path_table TYPE datetime DEFAULT time::now();
                 "#,
             )
             .await
@@ -60,15 +56,35 @@ pub async fn sync_path_table(
     db: &Surreal<Client>,
     entries: Vec<PathEntryWrapper>,
 ) -> surrealdb::Result<()> {
-    db.query(
-        r#"
-        INSERT INTO path_table $data 
-        ON DUPLICATE KEY UPDATE 
-            content = $after;
+    let a = db
+        .query(
+            r#"
+        -- Insert only if record doesn't exist yet
+        INSERT IGNORE INTO path_table $data;
+
+        -- Update existing records only if conditions are met
+        FOR $entry IN $data {
+            UPDATE $entry.id
+            SET
+                hops          = $entry.hops,
+                iface         = $entry.iface,
+                received_from = $entry.received_from,
+                last_seen     = time::now()
+            WHERE
+                (time::now() - last_seen) > 1m
+                OR $entry.hops <= hops;
+        };
     "#,
-    )
-    .bind(("data", entries))
-    .await?;
+        )
+        .bind(("data", entries))
+        .await?
+        .check();
+    match a {
+        Ok(_) => {}
+        Err(e) => {
+            log::error!("{:?}", e);
+        }
+    }
 
     Ok(())
 }
@@ -153,52 +169,57 @@ pub async fn router_init() {
 
     let mut path_rx = transport.subscribe_path_table();
 
+    // let route_timeout = 3600; // Time in seconds before we consider a path "lost"
+
     tokio::spawn(async move {
-        // let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
-        // Buffer to hold updates until the next sync interval
-        let mut pending_updates: HashMap<String, PathEntryWrapper> = HashMap::new();
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
         loop {
             tokio::select! {
-                // 1. Collect incoming events
+                // 1. Listen for new PathTable events from the Transport
                 res = path_rx.recv() => {
                     match res {
                         Ok(event) => {
                             let hash = event.destination.to_hex_string();
-                            let new_entry = PathEntryWrapper {
-                                id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
-                                received_from: event.received_from.map(|a| a.to_hex_string()),
-                                hops: event.hops,
-                                iface: event.iface.to_hex_string(),
-                            };
 
-                            // DEDUPLICATION: Only keep if it's a new destination OR has fewer hops
-                            let should_update = pending_updates.get(&hash)
-                                .map_or(true, |existing| new_entry.hops < existing.hops);
+                            // Check if we already know this path
+                            let is_better_or_new = local_path_map.get(&hash)
+                                .map_or(true, |existing| event.hops <= existing.hops);
 
-                            if should_update {
-                                pending_updates.insert(hash, new_entry);
+                            if is_better_or_new {
+                                local_path_map.insert(
+                                    hash.clone(),
+                                    PathEntryWrapper {
+                                        id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
+                                        received_from: event.received_from.map(|a| a.to_hex_string()),
+                                        hops: event.hops,
+                                        iface: event.iface.to_hex_string(),
+                                    },
+                                );
                             }
                         }
-                        Err(broadcast::error::RecvError::Lagged(n)) => log::warn!("Lagged {} events", n),
-                        Err(broadcast::error::RecvError::Closed) => return,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            log::warn!("Lagged, skipped {} path events", n);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                     }
                 }
-                // 2. Periodic Batch Sync
+                // 2. Periodic Maintenance: Sync to DB and Prune Stale Routes
                 _ = interval.tick() => {
-                    if !pending_updates.is_empty() {
-                        log::info!("Syncing {} unique path updates to DB", pending_updates.len());
-                        let data: Vec<PathEntryWrapper> = pending_updates.values().cloned().collect();
+                    // Prune local map of routes not seen recently
+                    // local_path_map.retain(|_, entry| {
+                    //     now - entry.last_seen < route_timeout
+                    // });
 
-                        // for (hash, entry) in pending_updates.drain() {
-                            // log::trace!("Updating path {} ({} hops)", hash, entry.hops);
-                            // local_path_map.insert(hash, entry);
-                        // }
+                    if !local_path_map.is_empty() {
+                        let entries: Vec<PathEntryWrapper> = local_path_map.values().cloned().collect();
+                        log::info!("Syncing {} active paths to DB", entries.len());
 
-                        // Optional: Trigger your db_sync here with the full local_path_map
-                        // let entries: Vec<_> = local_path_map.values().cloned().collect();
-                        let _ = sync_path_table(&db, data).await;
+                        // We use the existing sync_path_table function
+                        if let Err(e) = sync_path_table(&db, entries).await {
+                            log::error!("DB Sync failed: {}", e);
+                        }
                     }
                 }
             }
