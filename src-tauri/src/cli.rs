@@ -36,7 +36,7 @@ pub async fn db_init() -> Surreal<Client> {
                     DEFINE TABLE path_table SCHEMAFULL;
 
                     DEFINE FIELD hops          ON TABLE path_table TYPE int;
-                    DEFINE FIELD iface         ON TABLE path_table TYPE string;
+                    DEFINE FIELD iface         ON TABLE path_table TYPE option<string>;
                     DEFINE FIELD received_from ON TABLE path_table TYPE string;
                 "#,
             )
@@ -52,7 +52,7 @@ pub fn db_serve() {}
 pub struct PathEntryWrapper {
     id: RecordId,
     hops: u8,
-    received_from: String,
+    received_from: Option<String>,
     iface: String,
 }
 
@@ -73,73 +73,58 @@ pub async fn sync_path_table(
     Ok(())
 }
 
-pub fn add_transport_routes<P>(transport: Transport, path: P)
+#[derive(Debug, Deserialize)]
+struct Config {
+    interfaces: Vec<InterfaceConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InterfaceConfig {
+    #[serde(rename = "type")]
+    iface_type: String,
+    enabled: bool,
+    target_host: Option<String>,
+    target_port: Option<u16>,
+}
+
+pub async fn add_transport_routes<P>(transport: &Transport, path: P)
 where
     P: AsRef<std::path::Path>,
 {
     log::info!("Add transport Nodes");
 
-    let config = std::fs::read_to_string(path);
+    let config_str = std::fs::read_to_string(path).unwrap();
+
+    let config: Config = toml::from_str(&config_str).expect("Failed to parse TOML");
+
+    let mut counter = 0;
+
+    for iface in config.interfaces {
+        if !iface.enabled {
+            continue;
+        }
+
+        match iface.iface_type.as_str() {
+            "TCPClientInterface" => {
+                let host = iface.target_host.expect("Missing target_host");
+                let port = iface.target_port.expect("Missing target_port");
+
+                let _ = transport.iface_manager().lock().await.spawn(
+                    TcpClient::new(format!("{}:{}", host, port)),
+                    TcpClient::spawn,
+                );
+                counter += 1;
+            }
+
+            other => {
+                log::warn!("Unsupported interface type: {}", other);
+            }
+        }
+    }
+    log::info!("{} interfaces started!", counter);
 }
 
 pub async fn router_init() {
-    log::info!(">>> Reticulum Router + Path Monitor <<<");
-
-    log::info!("DB init");
-    let db = db_init().await;
-
-    // 1. Initialize Transport
-    let transport = Transport::new(TransportConfig::new(
-        "router-node",
-        &PrivateIdentity::new_from_rand(OsRng),
-        true,
-    ));
-
-    // TCP Server
-    let _ = transport.iface_manager().lock().await.spawn(
-        TcpServer::new("0.0.0.0:4242", transport.iface_manager()),
-        TcpServer::spawn,
-    );
-
-    // TCP Clients (Hubs)
-    let hub_1 = "202.61.243.41:4965";
-    let hub_2 = "reticulum.betweentheborders.com:4242";
-    let hub_3 = "dublin.connect.reticulum.network:4965";
-    let hub_4 = "202.61.243.41:4965";
-    let hub_5 = "193.26.158.230:4965";
-
-    for target in [hub_1, hub_2, hub_3, hub_4, hub_5] {
-        let addr = transport
-            .iface_manager()
-            .lock()
-            .await
-            .spawn(TcpClient::new(target), TcpClient::spawn);
-        log::trace!(
-            "Started Client interface {} to {}",
-            addr.to_hex_string(),
-            target
-        );
-    }
-
-    let mut path_rx = transport.recv_path_events().await;
-    log::warn!("monitoring: subscribed to path events");
-    tokio::spawn(async move {
-        log::warn!("monitoring: task started");
-        loop {
-            log::warn!("monitoring: waiting for event");
-            match path_rx.recv().await {
-                Ok(event) => log::warn!("monitoring: got event!"),
-                Err(e) => log::warn!("monitoring: error {:?}", e),
-            }
-        }
-    });
-
-    log::info!("Router is active. Press Ctrl+C to shut down.");
-    let _ = tokio::signal::ctrl_c().await;
-    log::info!("Shutting down...");
-}
-
-pub async fn router_init_old() {
     log::info!(">>> Reticulum Router + Path Monitor <<<");
 
     log::info!("DB init");
@@ -149,10 +134,8 @@ pub async fn router_init_old() {
     let transport = Transport::new(TransportConfig::new(
         "router-node",
         &PrivateIdentity::new_from_rand(OsRng),
-        true, // Routing enabled
+        true,
     ));
-    // Get the Arc<Mutex<TransportHandler>> and clone it for the thread
-    let handler_link = transport.get_handler();
 
     // Start TCP Server Interface
     let _ = transport.iface_manager().lock().await.spawn(
@@ -160,48 +143,67 @@ pub async fn router_init_old() {
         TcpServer::spawn,
     );
 
-    let addr = transport
-        .iface_manager()
-        .lock()
-        .await
-        .spawn(TcpClient::new("202.61.243.41:4965"), TcpClient::spawn);
-    log::trace!("Started Client interface {}", addr.to_hex_string());
-
-    let addr = transport.iface_manager().lock().await.spawn(
-        TcpClient::new("reticulum.betweentheborders.com:4242"),
-        TcpClient::spawn,
-    );
-    log::trace!("Started Client interface {}", addr.to_hex_string());
+    {
+        add_transport_routes(
+            &transport,
+            "/home/hallow/.local/share/retiscope/connections.toml",
+        )
+        .await;
+    }
 
     let mut path_rx = transport.subscribe_path_table();
+
     tokio::spawn(async move {
-        let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
+        // let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
+        // Buffer to hold updates until the next sync interval
+        let mut pending_updates: HashMap<String, PathEntryWrapper> = HashMap::new();
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+
         loop {
-            match path_rx.recv().await {
-                Ok(event) => {
-                    let hash = event.destination.to_hex_string();
-                    local_path_map.insert(
-                        hash.clone(),
-                        PathEntryWrapper {
-                            id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
-                            received_from: event.received_from.map(|a| a.to_hex_string()),
-                            hops: event.hops,
-                            iface: event.iface.to_hex_string(),
-                        },
-                    );
+            tokio::select! {
+                // 1. Collect incoming events
+                res = path_rx.recv() => {
+                    match res {
+                        Ok(event) => {
+                            let hash = event.destination.to_hex_string();
+                            let new_entry = PathEntryWrapper {
+                                id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
+                                received_from: event.received_from.map(|a| a.to_hex_string()),
+                                hops: event.hops,
+                                iface: event.iface.to_hex_string(),
+                            };
+
+                            // DEDUPLICATION: Only keep if it's a new destination OR has fewer hops
+                            let should_update = pending_updates.get(&hash)
+                                .map_or(true, |existing| new_entry.hops < existing.hops);
+
+                            if should_update {
+                                pending_updates.insert(hash, new_entry);
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => log::warn!("Lagged {} events", n),
+                        Err(broadcast::error::RecvError::Closed) => return,
+                    }
                 }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("Lagged, skipped {} path events", n);
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    log::error!("Path event channel closed");
-                    return;
+                // 2. Periodic Batch Sync
+                _ = interval.tick() => {
+                    if !pending_updates.is_empty() {
+                        log::info!("Syncing {} unique path updates to DB", pending_updates.len());
+                        let data: Vec<PathEntryWrapper> = pending_updates.values().cloned().collect();
+
+                        // for (hash, entry) in pending_updates.drain() {
+                            // log::trace!("Updating path {} ({} hops)", hash, entry.hops);
+                            // local_path_map.insert(hash, entry);
+                        // }
+
+                        // Optional: Trigger your db_sync here with the full local_path_map
+                        // let entries: Vec<_> = local_path_map.values().cloned().collect();
+                        let _ = sync_path_table(&db, data).await;
+                    }
                 }
             }
         }
     });
-
-    log::info!("Router is active. Monitoring PathTable every 5s.");
 
     let _ = tokio::signal::ctrl_c().await;
     log::info!("Shutting down...");
