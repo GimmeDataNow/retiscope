@@ -71,7 +71,7 @@ pub async fn sync_path_table(
                 received_from = $entry.received_from,
                 last_seen     = time::now()
             WHERE
-                (time::now() - last_seen) > 1m
+                (time::now() - last_seen) > 7d
                 OR $entry.hops <= hops;
         };
     "#,
@@ -220,6 +220,7 @@ pub async fn router_init() {
                         if let Err(e) = sync_path_table(&db, entries).await {
                             log::error!("DB Sync failed: {}", e);
                         }
+                        local_path_map.clear();
                     }
                 }
             }
