@@ -71,7 +71,7 @@ pub async fn sync_path_table(
                 received_from = $entry.received_from,
                 last_seen     = time::now()
             WHERE
-                (time::now() - last_seen) > 7d
+                (time::now() - last_seen) > 1h
                 OR $entry.hops <= hops;
         };
     "#,
@@ -169,11 +169,9 @@ pub async fn router_init() {
 
     let mut path_rx = transport.subscribe_path_table();
 
-    // let route_timeout = 3600; // Time in seconds before we consider a path "lost"
-
     tokio::spawn(async move {
         let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
 
         loop {
             tokio::select! {
@@ -182,21 +180,20 @@ pub async fn router_init() {
                     match res {
                         Ok(event) => {
                             let hash = event.destination.to_hex_string();
+                            let new_entry = PathEntryWrapper {
+                                id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
+                                received_from: event.received_from.map(|a| a.to_hex_string()),
+                                hops: event.hops,
+                                iface: event.iface.to_hex_string(),
+                            };
 
-                            // Check if we already know this path
-                            let is_better_or_new = local_path_map.get(&hash)
-                                .map_or(true, |existing| event.hops <= existing.hops);
+                            let changed = local_path_map.get(&hash)
+                                .map(|existing| existing.hops != new_entry.hops || existing.iface != new_entry.iface)
+                                .unwrap_or(true);
 
-                            if is_better_or_new {
-                                local_path_map.insert(
-                                    hash.clone(),
-                                    PathEntryWrapper {
-                                        id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
-                                        received_from: event.received_from.map(|a| a.to_hex_string()),
-                                        hops: event.hops,
-                                        iface: event.iface.to_hex_string(),
-                                    },
-                                );
+                            if changed {
+                                // log::info!("received path update from : {}", hash);
+                                local_path_map.insert(hash, new_entry);
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -207,10 +204,6 @@ pub async fn router_init() {
                 }
                 // 2. Periodic Maintenance: Sync to DB and Prune Stale Routes
                 _ = interval.tick() => {
-                    // Prune local map of routes not seen recently
-                    // local_path_map.retain(|_, entry| {
-                    //     now - entry.last_seen < route_timeout
-                    // });
 
                     if !local_path_map.is_empty() {
                         let entries: Vec<PathEntryWrapper> = local_path_map.values().cloned().collect();
