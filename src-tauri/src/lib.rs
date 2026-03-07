@@ -1,10 +1,50 @@
 use log::info;
 use std::env;
 use std::process::Stdio;
+use surrealdb::engine::remote::ws::{Client, Ws};
+use surrealdb::opt::auth::Root;
+use surrealdb::{self, Surreal};
+use surrealdb_types::{RecordId, SurrealValue};
+
 use tauri::{AppHandle, Emitter, State};
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+
+mod cli;
+
+#[tauri::command]
+async fn get_graph_data() -> Result<Vec<cli::PathEntryWrapper>, String> {
+    // 1. Connect (Consider keeping the DB handle in Tauri State instead of re-connecting every time)
+    let db = Surreal::new::<Ws>("127.0.0.1:8000")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db.signin(Root {
+        username: "a".into(),
+        password: "a".into(),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    db.use_ns("main")
+        .use_db("main")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2. Query and Map
+    let mut response = db
+        .query("SELECT * FROM path_table;")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // .take(0) pulls the result from the first statement in the query string
+    let rows: Vec<cli::PathEntryWrapper> = response.take(0).map_err(|e| e.to_string())?;
+    // log::trace!("{:?}", rows);
+
+    Ok(rows)
+}
 
 // A struct to hold our active process
 struct ProcessState(Mutex<Option<Child>>);
@@ -74,6 +114,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(ProcessState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
+            get_graph_data,
             start_logging_process,
             stop_logging_process
         ])

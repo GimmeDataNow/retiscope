@@ -168,6 +168,7 @@ pub async fn router_init() {
     }
 
     let mut path_rx = transport.subscribe_path_table();
+    const MAX_MAP_SIZE: usize = 10000;
 
     tokio::spawn(async move {
         let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
@@ -175,46 +176,61 @@ pub async fn router_init() {
 
         loop {
             tokio::select! {
-                // 1. Listen for new PathTable events from the Transport
                 res = path_rx.recv() => {
                     match res {
                         Ok(event) => {
                             let hash = event.destination.to_hex_string();
-                            let new_entry = PathEntryWrapper {
-                                id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
-                                received_from: event.received_from.map(|a| a.to_hex_string()),
-                                hops: event.hops,
-                                iface: event.iface.to_hex_string(),
+
+                            // 1. Better Path Check (Logic: Less hops = Better)
+                            let is_better = if let Some(existing) = local_path_map.get(&hash) {
+                                event.hops < existing.hops
+                            } else {
+                                // 2. Size Limit Check (Only add new entries if under limit)
+                                if local_path_map.len() < MAX_MAP_SIZE {
+                                    true // We have room, add it
+                                } else {
+                                    // ONLY log this when we actually hit the limit
+                                    log::warn!("Memory map limit reached ({}). Skipping new discovery: {}", MAX_MAP_SIZE, hash);
+                                    false
+                                }
                             };
 
-                            let changed = local_path_map.get(&hash)
-                                .map(|existing| existing.hops != new_entry.hops || existing.iface != new_entry.iface)
-                                .unwrap_or(true);
-
-                            if changed {
-                                // log::info!("received path update from : {}", hash);
-                                local_path_map.insert(hash, new_entry);
+                            if is_better {
+                                // log::trace!("better path found");
+                                local_path_map.insert(hash.clone(), PathEntryWrapper {
+                                    id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
+                                    received_from: event.received_from.map(|a| a.to_hex_string()),
+                                    hops: event.hops,
+                                    iface: event.iface.to_hex_string(),
+                                });
+                            } else {
+                                // log::warn!("The buffer for paths is full, skipping this event");
                             }
+
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("Lagged, skipped {} path events", n);
+                            log::warn!("Channel lagged: missed {} events", n);
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        Err(_) => return,
                     }
                 }
-                // 2. Periodic Maintenance: Sync to DB and Prune Stale Routes
+
                 _ = interval.tick() => {
-
                     if !local_path_map.is_empty() {
-                        let entries: Vec<PathEntryWrapper> = local_path_map.values().cloned().collect();
-                        log::info!("Syncing {} active paths to DB", entries.len());
+                        // 3. Atomically take the map to clear memory immediately
+                        let snapshot = std::mem::take(&mut local_path_map);
 
-                        // We use the existing sync_path_table function
-                        if let Err(e) = sync_path_table(&db, entries).await {
-                            log::error!("DB Sync failed: {}", e);
-                        }
-                        local_path_map.clear();
+                        let db_clone = db.clone();
+
+                        tokio::spawn(async move {
+                            let entries: Vec<PathEntryWrapper> = snapshot.into_iter().map(|(_, v)| v).collect();
+                            log::info!("DB sync started with {}", entries.len());
+                            if let Err(e) = sync_path_table(&db_clone, entries).await {
+                                log::error!("DB Sync failed: {}", e);
+                            }
+                        });
                     }
+
                 }
             }
         }

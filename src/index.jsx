@@ -7,6 +7,7 @@ import { Connection } from "./components/Connection.jsx";
 import { GlobalProvider } from "./store/GlobalContext";
 import App from "./App";
 import Logview from "./Logview.jsx"
+import NodeGraph from "./components/NodeGraph.jsx";
 
 render(
     () => (
@@ -14,6 +15,7 @@ render(
             <Router root={Sidebar}>
                 <Route path="/" component={App} />
                 <Route path="/logview"/>
+                <Route path="/nodegraph" component={NodeGraph}/>
                 <Route path="/connections" component={ConnectionLayout}>
                     <Route path="/" component={() => <Navigate href="local" />} />
                     <Route path="/local" component={() => <Connection />} />

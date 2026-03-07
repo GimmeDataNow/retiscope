@@ -13,7 +13,7 @@ export function Sidebar(props) {
           <h1 class="title">Retiscope</h1>
         </div>
         <A href="/" end>Dashboard</A>
-        <A href="/graph">Node Graph</A>
+        <A href="/nodegraph">Node Graph</A>
         <A href="/pathtable">Path Table</A>
         <A href="/announcetable">Announce Table</A>
         <A href="/announcestream">Announce Stream</A>
