@@ -9,31 +9,16 @@ export default function NodeGraph() {
   const [data] = createResource(async () => await invoke("get_graph_data"));
 
   const stringifyId = (val) => {
-    if (!val) return "unknown";
-    
-    // 1. If it's already a simple string (e.g., "cbbd5f99...")
+    if (!val) return null;
     if (typeof val === 'string') return val;
-  
-    // 2. If it's the SurrealDB RecordID object
     if (typeof val === 'object') {
-      // Check for the new SurrealDB 3.0 structure: { table: "...", id: { String: "..." } }
-      // Note: Sometimes SurrealDB uses 'id' and sometimes 'key' depending on the driver version
-      const innerId = val.id || val.key; 
-  
-      if (innerId && typeof innerId === 'object') {
-        // It's the { String: "hex" } or { Number: 123 } variant
-        return innerId.String || innerId.Number || JSON.stringify(innerId);
-      }
-      
-      // Check for the { tb: "...", id: "..." } variant
-      if (val.tb && val.id) {
-        return typeof val.id === 'object' ? (val.id.String || JSON.stringify(val.id)) : val.id;
-      }
-  
-      // Last resort fallback for objects
+      // Prioritize the String key inside the id/key object
+      const inner = val.id || val.key || val;
+      if (inner && inner.String) return inner.String;
+      if (inner && inner.Number) return String(inner.Number);
+      if (val.tb && val.id) return typeof val.id === 'object' ? (val.id.String || JSON.stringify(val.id)) : val.id;
       return JSON.stringify(val);
     }
-  
     return String(val);
   };
 
@@ -41,104 +26,99 @@ export default function NodeGraph() {
     const rawData = data();
     if (!rawData || !container) return;
 
-    // --- DEBUGGING ---
-    // console.log("First Entry Raw Data:", rawData[0]);
-    // console.log("Sample Stringified ID:", stringifyId(rawData[0]?.id));
-    // -----------------
-
     const graph = new Graph();
+    
+    // Identify who is a relay (anyone who appears in a 'received_from' field)
+    const relays = new Set(rawData.map(d => stringifyId(d.received_from)).filter(Boolean));
 
     graph.addNode("origin", { 
       label: "Origin", size: 15, color: "#ff4757", x: 0, y: 0 
     });
 
-    // PASS 1: Create all nodes
+    // PASS 1: Create Nodes with consistent coloring
     rawData.forEach((entry) => {
       const nodeId = stringifyId(entry.id);
       const ifaceId = stringifyId(entry.iface);
-      const recvId = entry.received_from ? stringifyId(entry.received_from) : null;
+      const recvId = stringifyId(entry.received_from);
 
+      // 1. Create/Update Interface Node (Green)
       if (!graph.hasNode(ifaceId)) {
         graph.addNode(ifaceId, { 
-          label: `IF: ${ifaceId}`, 
-          size: 10, color: "#2ed573" 
+          label: `IF: ${ifaceId.slice(-4)}`, 
+          size: 10, 
+          color: "#2ed573" 
         });
-        // Connect to origin immediately
         graph.addEdge("origin", ifaceId, { color: "#2ed573", weight: 2 });
       }
 
+      // 2. Create/Update Data Node
+      // Determine color: Gray if direct (hops: 0), Blue if indirect (hops > 0)
+      const nodeColor = entry.hops === 0 ? "#747d8c" : "#1e90ff";
+      const nodeSize = entry.hops === 0 ? 8 : 6;
+
       if (!graph.hasNode(nodeId)) {
         graph.addNode(nodeId, { 
-          label: nodeId, 
-          size: 6, color: "#1e90ff" 
+          label: nodeId.slice(0, 8), 
+          size: nodeSize, 
+          color: nodeColor 
         });
+      } else {
+        // If the node was already added (e.g., as a recvId earlier), 
+        // update its color based on its own actual hop data
+        graph.setNodeAttribute(nodeId, "color", nodeColor);
+        graph.setNodeAttribute(nodeId, "size", nodeSize);
       }
 
+      // 3. Create Relay Node placeholder if it doesn't exist
+      // (If we haven't processed the entry for this ID yet, we'll default it to gray)
       if (recvId && !graph.hasNode(recvId)) {
         graph.addNode(recvId, { 
-          label: `R: ${recvId}`, 
-          size: 6, color: "#747d8c" 
+          label: `R: ${recvId.slice(0, 4)}`, 
+          size: 8, 
+          color: "#747d8c" 
         });
       }
     });
 
-    // --- PASS 2: Add ALL Edges with Chaining Logic ---
+    // PASS 2: Edges
     rawData.forEach((entry) => {
       const nodeId = stringifyId(entry.id);
       const ifaceId = stringifyId(entry.iface);
-      const recvId = entry.received_from ? stringifyId(entry.received_from) : null;
-    
-      // 1. Every interface must connect to Origin (The Anchor)
+      const recvId = stringifyId(entry.received_from);
+
       if (!graph.hasEdge("origin", ifaceId)) {
-        graph.addEdge("origin", ifaceId, { color: "#2ed573", size: 3 });
+        graph.addEdge("origin", ifaceId, { color: "#2ed573", size: 2 });
       }
-    
-      // 2. Routing Logic
+
       if (entry.hops === 0) {
-        // This node is physically seen by the interface
-        if (!graph.hasEdge(nodeId, ifaceId)) {
-          graph.addEdge(nodeId, ifaceId, { color: "#555", type: "line" });
-        }
+        if (!graph.hasEdge(nodeId, ifaceId)) graph.addEdge(nodeId, ifaceId);
       } else if (recvId) {
-        // This node is seen via a relay. 
-        // Connect the node to its reporter (the gray node)
         if (graph.hasNode(nodeId) && graph.hasNode(recvId)) {
-          if (!graph.hasEdge(nodeId, recvId)) {
-            graph.addEdge(nodeId, recvId, { color: "#777", type: "line" });
-          }
+          if (!graph.hasEdge(nodeId, recvId)) graph.addEdge(nodeId, recvId);
         }
-        
-        // CRITICAL: We also need to make sure the Relay (recvId) eventually 
-        // connects to the interface (ifaceId) so the cluster isn't floating.
-        if (graph.hasNode(recvId) && graph.hasNode(ifaceId)) {
-          if (!graph.hasEdge(recvId, ifaceId) && recvId !== ifaceId) {
-            // We link the relay to the interface it's reporting through
-            graph.addEdge(recvId, ifaceId, { color: "#ffa502", weight: 0.5 });
-          }
+        // Chain the relay to the interface to prevent floating
+        if (graph.hasNode(recvId) && graph.hasNode(ifaceId) && recvId !== ifaceId) {
+          if (!graph.hasEdge(recvId, ifaceId)) graph.addEdge(recvId, ifaceId, { color: "#ffa502", weight: 0.5 });
         }
       }
     });
 
-    // Layout
+    // Layout & Render
     graph.nodes().forEach(n => {
-      if(n === "origin") return;
       graph.setNodeAttribute(n, "x", Math.random());
       graph.setNodeAttribute(n, "y", Math.random());
     });
 
     forceAtlas2.assign(graph, { 
-        iterations: 150, 
-        settings: { 
-            gravity: 0.8, 
-            scalingRatio: 20, 
-            strongGravityMode: true 
-        } 
+      iterations: 200, 
+      settings: { gravity: 1.2, scalingRatio: 10, strongGravityMode: true } 
     });
 
     const renderer = new Sigma(graph, container, {
-        labelSize: 10,
-        labelWeight: "bold",
-        labelColor: { color: "#fff" }
+      labelSize: 11,
+      labelWeight: "bold",
+      labelColor: { color: "#fff" },
+      defaultEdgeType: "line"
     });
 
     onMount(() => () => renderer.kill());
