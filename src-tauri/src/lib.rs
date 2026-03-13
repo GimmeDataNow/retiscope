@@ -1,6 +1,8 @@
 use log::info;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::process::Stdio;
+
 use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::{self, Surreal};
@@ -44,6 +46,56 @@ async fn get_graph_data() -> Result<Vec<cli::PathEntryWrapper>, String> {
     // log::trace!("{:?}", rows);
 
     Ok(rows)
+}
+
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
+pub struct GatewaySummary {
+    gateway_address: String,
+    nodes_reachable: u64,
+    min_hops: u8,
+    primary_iface: Vec<String>,
+}
+
+#[tauri::command]
+async fn get_gateway_summary() -> Result<Vec<GatewaySummary>, String> {
+    // 1. Connect (Consider keeping the DB handle in Tauri State instead of re-connecting every time)
+    let db = Surreal::new::<Ws>("127.0.0.1:8000")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db.signin(Root {
+        username: "a".into(),
+        password: "a".into(),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    db.use_ns("main")
+        .use_db("main")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2. The Query
+    // Note: We use string::slice to handle the 'path_table:' prefix if present
+    let sql = "
+        SELECT 
+            received_from AS gateway_address,
+            count() AS nodes_reachable,
+            math::min(hops) AS min_hops,
+            array::distinct(iface) AS primary_iface
+        FROM path_table 
+        WHERE 
+            received_from != string::split(meta::tb(id), ':')[1]
+        GROUP BY 
+            received_from;
+    ";
+
+    let mut response = db.query(sql).await.map_err(|e| e.to_string())?;
+
+    // 3. Extract results
+    let summaries: Vec<GatewaySummary> = response.take(0).map_err(|e| e.to_string())?;
+
+    Ok(summaries)
 }
 
 // A struct to hold our active process
@@ -115,6 +167,7 @@ pub fn run() {
         .manage(ProcessState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_graph_data,
+            get_gateway_summary,
             start_logging_process,
             stop_logging_process
         ])

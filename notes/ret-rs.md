@@ -100,3 +100,43 @@ surreal start --user a --pass a --bind 0.0.0.0:8000 rocksdb:$HOME/.local/share/r
 might be the solution
 
 ON DELETE CASCADE
+
+pub struct AnnounceEvent {
+    pub destination: Arc<Mutex<SingleOutputDestination>>,
+    pub app_data: PacketDataBuffer,
+}
+
+pub type SingleOutputDestination = Destination<Identity, Output, Single>;
+
+pub struct Destination<I: HashIdentity, D: Direction, T: Type> {
+    pub direction: PhantomData<D>,
+    pub r#type: PhantomData<T>,
+    pub identity: I,
+    pub desc: DestinationDesc,
+}
+
+pub struct DestinationDesc {
+    pub identity: Identity,
+    pub address_hash: AddressHash,
+    pub name: DestinationName,
+}
+
+AnnouceEvent->Destination->DestinationDesc->(identity, address_hash, name)
+identity->(public_key, verifying_key, address_hash)
+
+
+
+The transport.recv_announces() function call is already cryptographically validated.
+The handler.announce_tx.send() call is called from the handle_announce() function call.
+It triggers at the end of the function but only if DestinationAnnounce::validate(packet)
+has passed.
+
+it may be neccesary to modify the handle_announce() function to allow reading of the hop count.
+It is not provided natively. Modification to the AnnounceEvent will then also be needed.
+It seems that AnnounceEvent is rarely used, thus making it a simple modification.
+
+
+node->relation->node
+
+relation:
+    hops, time, 
