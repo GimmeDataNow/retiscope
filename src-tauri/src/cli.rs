@@ -4,6 +4,8 @@ use rand_core::OsRng;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
+use std::sync::Arc;
+use tokio::sync::{broadcast, Semaphore};
 
 use reticulum::iface::tcp_server::TcpServer;
 use std::collections::HashMap;
@@ -15,32 +17,32 @@ use surrealdb_types::{RecordId, SurrealValue};
 
 use serde::{Deserialize, Serialize};
 
-pub async fn db_init() -> Surreal<Client> {
-    let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
-    db.signin(Root {
-        username: "a".into(),
-        password: "a".into(),
-    })
-    .await
-    .unwrap();
-    db.use_ns("main").use_db("main").await.unwrap();
-    {
-        let _ = db
-            .query(
-                r#"
-                    DEFINE TABLE path_table SCHEMAFULL;
+// pub async fn db_init() -> Surreal<Client> {
+//     let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+//     db.signin(Root {
+//         username: "a".into(),
+//         password: "a".into(),
+//     })
+//     .await
+//     .unwrap();
+//     db.use_ns("main").use_db("main").await.unwrap();
+//     {
+//         let _ = db
+//             .query(
+//                 r#"
+//                     DEFINE TABLE path_table SCHEMAFULL;
 
-                    DEFINE FIELD hops          ON TABLE path_table TYPE int;
-                    DEFINE FIELD iface         ON TABLE path_table TYPE string;
-                    DEFINE FIELD received_from ON TABLE path_table TYPE option<string>;
-                    DEFINE FIELD last_seen     ON TABLE path_table TYPE datetime DEFAULT time::now();
-                "#,
-            )
-            .await
-            .unwrap();
-    }
-    db
-}
+//                     DEFINE FIELD hops          ON TABLE path_table TYPE int;
+//                     DEFINE FIELD iface         ON TABLE path_table TYPE string;
+//                     DEFINE FIELD received_from ON TABLE path_table TYPE option<string>;
+//                     DEFINE FIELD last_seen     ON TABLE path_table TYPE datetime DEFAULT time::now();
+//                 "#,
+//             )
+//             .await
+//             .unwrap();
+//     }
+//     db
+// }
 
 pub fn db_serve() {}
 
@@ -52,42 +54,42 @@ pub struct PathEntryWrapper {
     iface: String,
 }
 
-pub async fn sync_path_table(
-    db: &Surreal<Client>,
-    entries: Vec<PathEntryWrapper>,
-) -> surrealdb::Result<()> {
-    let a = db
-        .query(
-            r#"
-        -- Insert only if record doesn't exist yet
-        INSERT IGNORE INTO path_table $data;
+// pub async fn sync_path_table(
+//     db: &Surreal<Client>,
+//     entries: Vec<PathEntryWrapper>,
+// ) -> surrealdb::Result<()> {
+//     let a = db
+//         .query(
+//             r#"
+//         -- Insert only if record doesn't exist yet
+//         INSERT IGNORE INTO path_table $data;
 
-        -- Update existing records only if conditions are met
-        FOR $entry IN $data {
-            UPDATE $entry.id
-            SET
-                hops          = $entry.hops,
-                iface         = $entry.iface,
-                received_from = $entry.received_from,
-                last_seen     = time::now()
-            WHERE
-                (time::now() - last_seen) > 1h
-                OR $entry.hops <= hops;
-        };
-    "#,
-        )
-        .bind(("data", entries))
-        .await?
-        .check();
-    match a {
-        Ok(_) => {}
-        Err(e) => {
-            log::error!("{:?}", e);
-        }
-    }
+//         -- Update existing records only if conditions are met
+//         FOR $entry IN $data {
+//             UPDATE $entry.id
+//             SET
+//                 hops          = $entry.hops,
+//                 iface         = $entry.iface,
+//                 received_from = $entry.received_from,
+//                 last_seen     = time::now()
+//             WHERE
+//                 (time::now() - last_seen) > 1h
+//                 OR $entry.hops <= hops;
+//         };
+//     "#,
+//         )
+//         .bind(("data", entries))
+//         .await?
+//         .check();
+//     match a {
+//         Ok(_) => {}
+//         Err(e) => {
+//             log::error!("{:?}", e);
+//         }
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -143,8 +145,8 @@ where
 pub async fn router_init() {
     log::info!(">>> Reticulum Router + Path Monitor <<<");
 
-    log::info!("DB init");
-    let db = db_init().await;
+    // log::info!("DB init");
+    // let db = db_init().await;
 
     // Init transport
     let transport = Transport::new(TransportConfig::new(
@@ -153,88 +155,69 @@ pub async fn router_init() {
         true,
     ));
 
-    // Start TCP Server Interface
-    let _ = transport.iface_manager().lock().await.spawn(
-        TcpServer::new("0.0.0.0:4242", transport.iface_manager()),
-        TcpServer::spawn,
-    );
+    // this is just plain bad but I will have to redo this later regardless
+    add_transport_routes(
+        &transport,
+        "/home/hallow/.local/share/retiscope/connections.toml",
+    )
+    .await;
 
-    {
-        add_transport_routes(
-            &transport,
-            "/home/hallow/.local/share/retiscope/connections.toml",
-        )
-        .await;
+    // take care of the all the messages
+    // ERROR: fucking deadlock again
+    let mut announce_rx = transport.recv_announces().await;
+    let semaphore = Arc::new(Semaphore::new(16)); // Slightly higher for 29 interfaces
+
+    log::info!("Announce processor active and decoupled from Handler lock.");
+
+    loop {
+        // 2. We are now calling .recv() on the broadcast channel directly.
+        // This DOES NOT trigger transport.handler.lock().
+        match announce_rx.recv().await {
+            Ok(event) => {
+                let sem = semaphore.clone();
+                tokio::spawn(async move {
+                    let _permit = sem.acquire_owned().await.unwrap();
+
+                    let dest = event.packet.destination;
+                    log::trace!("Received announce for: {}", dest);
+
+                    // DO NOT try to lock transport.handler here unless absolutely necessary.
+                    // If you must, ensure it is a short-lived lock.
+                });
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                log::warn!("Lagged by {} messages", n);
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
     }
 
-    let mut path_rx = transport.subscribe_path_table();
-    const MAX_MAP_SIZE: usize = 10000;
+    // loop {
+    //     match annouce_fetch.recv().await {
+    //         Ok(event) => {
+    //             let sem = semaphore.clone();
+    //             // let permit = semaphore.clone().acquire_owned().await.unwrap();
 
-    tokio::spawn(async move {
-        let mut local_path_map: HashMap<String, PathEntryWrapper> = HashMap::new();
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    //             tokio::spawn(async move {
+    //                 let permit = sem.clone().acquire_owned().await.unwrap();
+    //                 let dest = event.packet.destination;
+    //                 let hops = event.packet.header.hops;
+    //                 log::trace!("Received an announce {} hops away with: {}", hops, dest);
 
-        loop {
-            tokio::select! {
-                res = path_rx.recv() => {
-                    match res {
-                        Ok(event) => {
-                            let hash = event.destination.to_hex_string();
-
-                            // 1. Better Path Check (Logic: Less hops = Better)
-                            let is_better = if let Some(existing) = local_path_map.get(&hash) {
-                                event.hops < existing.hops
-                            } else {
-                                // 2. Size Limit Check (Only add new entries if under limit)
-                                if local_path_map.len() < MAX_MAP_SIZE {
-                                    true // We have room, add it
-                                } else {
-                                    // ONLY log this when we actually hit the limit
-                                    log::warn!("Memory map limit reached ({}). Skipping new discovery: {}", MAX_MAP_SIZE, hash);
-                                    false
-                                }
-                            };
-
-                            if is_better {
-                                // log::trace!("better path found");
-                                local_path_map.insert(hash.clone(), PathEntryWrapper {
-                                    id: RecordId::parse_simple(&format!("path_table:{}", hash)).unwrap(),
-                                    received_from: event.received_from.map(|a| a.to_hex_string()),
-                                    hops: event.hops,
-                                    iface: event.iface.to_hex_string(),
-                                });
-                            } else {
-                                // log::warn!("The buffer for paths is full, skipping this event");
-                            }
-
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("Channel lagged: missed {} events", n);
-                        }
-                        Err(_) => return,
-                    }
-                }
-
-                _ = interval.tick() => {
-                    if !local_path_map.is_empty() {
-                        // 3. Atomically take the map to clear memory immediately
-                        let snapshot = std::mem::take(&mut local_path_map);
-
-                        let db_clone = db.clone();
-
-                        tokio::spawn(async move {
-                            let entries: Vec<PathEntryWrapper> = snapshot.into_iter().map(|(_, v)| v).collect();
-                            log::info!("DB sync started with {}", entries.len());
-                            if let Err(e) = sync_path_table(&db_clone, entries).await {
-                                log::error!("DB Sync failed: {}", e);
-                            }
-                        });
-                    }
-
-                }
-            }
-        }
-    });
+    //                 // process_event(event).await;
+    //                 drop(permit);
+    //             });
+    //         }
+    //         Err(broadcast::error::RecvError::Lagged(n)) => {
+    //             // may not be the best but this is what reticulum-rs provides
+    //             eprintln!("Receiver lagged by {} messages. Skipping to catch up.", n);
+    //         }
+    //         Err(broadcast::error::RecvError::Closed) => {
+    //             println!("Sender dropped. Shutting down worker.");
+    //             break;
+    //         }
+    //     }
+    // }
 
     let _ = tokio::signal::ctrl_c().await;
     log::info!("Shutting down...");
