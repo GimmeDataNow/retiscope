@@ -1,4 +1,5 @@
-use log::{self};
+use tracing::{debug, error, info, instrument, span, trace, warn, Level};
+// use log::{self};
 
 use rand_core::OsRng;
 use reticulum::identity::PrivateIdentity;
@@ -105,11 +106,12 @@ struct InterfaceConfig {
     target_port: Option<u16>,
 }
 
+#[instrument(skip(transport, path))]
 pub async fn add_transport_routes<P>(transport: &Transport, path: P)
 where
-    P: AsRef<std::path::Path>,
+    P: AsRef<std::path::Path> + std::fmt::Debug,
 {
-    log::info!("Add transport Nodes");
+    info!("adding transport nodes");
 
     let config_str = std::fs::read_to_string(path).unwrap();
 
@@ -127,32 +129,31 @@ where
                 let host = iface.target_host.expect("Missing target_host");
                 let port = iface.target_port.expect("Missing target_port");
 
-                let _ = transport.iface_manager().lock().await.spawn(
+                let a = transport.iface_manager().lock().await.spawn(
                     TcpClient::new(format!("{}:{}", host, port)),
                     TcpClient::spawn,
                 );
+                info!("spawning an iface with: {}:{} @ {}", host, port, a);
                 counter += 1;
             }
 
             other => {
-                log::warn!("Unsupported interface type: {}", other);
+                warn!("Unsupported interface type: {}", other);
             }
         }
     }
-    log::info!("{} interfaces started!", counter);
+    info!("{} interfaces started!", counter);
 }
 
-pub async fn router_init() {
-    log::info!(">>> Reticulum Router + Path Monitor <<<");
-
-    // log::info!("DB init");
-    // let db = db_init().await;
+#[instrument]
+pub async fn router() {
+    info!("router started");
 
     // Init transport
     let transport = Transport::new(TransportConfig::new(
         "router-node",
         &PrivateIdentity::new_from_rand(OsRng),
-        true,
+        false,
     ));
 
     // this is just plain bad but I will have to redo this later regardless
@@ -164,61 +165,74 @@ pub async fn router_init() {
 
     // take care of the all the messages
     // ERROR: fucking deadlock again
-    let mut announce_rx = transport.recv_announces().await;
-    let semaphore = Arc::new(Semaphore::new(16)); // Slightly higher for 29 interfaces
 
-    log::info!("Announce processor active and decoupled from Handler lock.");
-
-    loop {
-        // 2. We are now calling .recv() on the broadcast channel directly.
-        // This DOES NOT trigger transport.handler.lock().
-        match announce_rx.recv().await {
-            Ok(event) => {
-                let sem = semaphore.clone();
-                tokio::spawn(async move {
-                    let _permit = sem.acquire_owned().await.unwrap();
-
-                    let dest = event.packet.destination;
-                    log::trace!("Received announce for: {}", dest);
-
-                    // DO NOT try to lock transport.handler here unless absolutely necessary.
-                    // If you must, ensure it is a short-lived lock.
-                });
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                log::warn!("Lagged by {} messages", n);
-            }
-            Err(broadcast::error::RecvError::Closed) => break,
-        }
-    }
+    // let mut announce_rx = transport.recv_announces().await;
+    // trace!("here");
+    // let mut iface_rx_maybe = transport.iface_rx();
 
     // loop {
-    //     match annouce_fetch.recv().await {
-    //         Ok(event) => {
-    //             let sem = semaphore.clone();
-    //             // let permit = semaphore.clone().acquire_owned().await.unwrap();
-
-    //             tokio::spawn(async move {
-    //                 let permit = sem.clone().acquire_owned().await.unwrap();
-    //                 let dest = event.packet.destination;
-    //                 let hops = event.packet.header.hops;
-    //                 log::trace!("Received an announce {} hops away with: {}", hops, dest);
-
-    //                 // process_event(event).await;
-    //                 drop(permit);
-    //             });
+    //     // trace!("maybe here?");
+    //     match iface_rx_maybe.recv().await {
+    //         Ok(ok) => {
+    //             // debug!("address: {}", ok.address);
+    //             match ok.packet.header.packet_type {
+    //                 reticulum::packet::PacketType::Announce => {
+    //                     // info!("address: {}", ok.address)
+    //                     // info!(
+    //                     //     "dest: {}, distance: {}",
+    //                     //     ok.packet.destination, ok.packet.header.hops
+    //                     // )
+    //                     info!(
+    //                         iface = %ok.address.to_hex_string(),
+    //                         destination = %ok.packet.destination.to_hex_string(),
+    //                         via = ?ok.packet.transport.map(|h| h.to_hex_string()),
+    //                         hops = ?ok.packet.header.hops, // field name may differ
+    //                         "announce"
+    //                     );
+    //                 }
+    //                 _ => {
+    //                     debug!("discard")
+    //                 }
+    //             }
     //         }
     //         Err(broadcast::error::RecvError::Lagged(n)) => {
-    //             // may not be the best but this is what reticulum-rs provides
-    //             eprintln!("Receiver lagged by {} messages. Skipping to catch up.", n);
+    //             warn!("Lagged behind by {} messages, continuing", n);
+    //             // Don't break — just keep going
     //         }
-    //         Err(broadcast::error::RecvError::Closed) => {
-    //             println!("Sender dropped. Shutting down worker.");
+    //         Err(e) => {
+    //             error!("Fatal error: {}", e);
     //             break;
     //         }
     //     }
     // }
+    let mut announce = transport.recv_announces().await;
 
-    let _ = tokio::signal::ctrl_c().await;
-    log::info!("Shutting down...");
+    loop {
+        match announce.recv().await {
+            Ok(ok) => {
+                trace!(
+                    // distance
+                    hops = ok.packet.header.hops,
+                    // which node did it come from. If None then the node itself was the sender
+                    transport_node = format_args!(
+                        "<{}>",
+                        ok.packet
+                            .transport
+                            .map(|h| h.to_hex_string())
+                            .unwrap_or_else(|| "Self".to_string())
+                    ),
+                    // the actual destination
+                    destination = format_args!("<{}>", ok.packet.destination.to_hex_string()),
+                    // descriptor
+                    "Announce Trace"
+                );
+            }
+            Err(e) => {
+                error!("Error: {}", e);
+            }
+        }
+    }
+
+    // let _ = tokio::signal::ctrl_c().await;
+    // info!("Shutting down...");
 }

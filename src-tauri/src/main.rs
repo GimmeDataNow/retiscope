@@ -1,10 +1,12 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{thread::sleep, time};
+use tracing::{info, Level};
+// use tracing_subscriber::{self, util::SubscriberInitExt,c};
+use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter};
 
 use clap::Parser;
-use log::{self, info};
+// use log::{self, info};
 
 mod cli;
 
@@ -20,19 +22,19 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    let initial_filter = EnvFilter::new("retiscope=trace,reticulum=warn,surrealdb=error");
+    let (filter_layer, reload_handle) = reload::Layer::new(initial_filter);
+
+    let _ = tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::layer().with_target(false)) // prints to stdout/stderr
+        .init();
     tauri::async_runtime::set(tokio::runtime::Handle::current());
 
     let args = Args::parse();
-    if args.cli {
-        info!("CLI started");
-        // cli::cli_init();
-        // cli::db_init().await;
-        cli::router_init().await;
 
-        // loop {
-        //     sleep(time::Duration::from_secs(1));
-        //     info!("wow");
-        // }
+    if args.cli {
+        cli::router().await;
     } else {
         info!("GUI started");
         retiscope_lib::run()
