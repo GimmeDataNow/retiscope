@@ -1,12 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tracing::{info, Level};
-// use tracing_subscriber::{self, util::SubscriberInitExt,c};
+use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter};
 
 use clap::Parser;
-// use log::{self, info};
 
 mod cli;
 
@@ -15,17 +13,17 @@ mod cli;
 #[command(about = "A Reticulum Network Explorer", long_about = None)]
 #[command(version)]
 struct Args {
-    /// Launch in CLI mode instead of GUI
+    /// Use CLI
     #[arg(long)]
     cli: bool,
 }
 
 #[tokio::main]
 async fn main() {
-    let initial_filter = EnvFilter::new("retiscope=trace,reticulum=warn,surrealdb=error");
-    let (filter_layer, reload_handle) = reload::Layer::new(initial_filter);
+    let initial_filter = EnvFilter::new("retiscope=info,reticulum=warn,surrealdb=error");
+    let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
 
-    let _ = tracing_subscriber::registry()
+    tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt::layer().with_target(false)) // prints to stdout/stderr
         .init();

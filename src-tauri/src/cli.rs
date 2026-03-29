@@ -1,96 +1,64 @@
-use tracing::{debug, error, info, instrument, span, trace, warn, Level};
-// use log::{self};
+use tokio::sync::mpsc;
+use tokio::time::{interval, Duration};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use rand_core::OsRng;
+use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
-use std::sync::Arc;
-use tokio::sync::{broadcast, Semaphore};
-
-use reticulum::iface::tcp_server::TcpServer;
-use std::collections::HashMap;
 
 use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::{self, Surreal};
-use surrealdb_types::{RecordId, SurrealValue};
+use surrealdb_types::SurrealValue;
 
 use serde::{Deserialize, Serialize};
 
-// pub async fn db_init() -> Surreal<Client> {
-//     let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
-//     db.signin(Root {
-//         username: "a".into(),
-//         password: "a".into(),
-//     })
-//     .await
-//     .unwrap();
-//     db.use_ns("main").use_db("main").await.unwrap();
-//     {
-//         let _ = db
-//             .query(
-//                 r#"
-//                     DEFINE TABLE path_table SCHEMAFULL;
+pub async fn db_init() -> Surreal<Client> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+    db.signin(Root {
+        username: "a".into(),
+        password: "a".into(),
+    })
+    .await
+    .unwrap();
+    db.use_ns("main").use_db("main").await.unwrap();
+    {
+        let _ = db
+            .query(
+                r#"
+                    -- 1. Unique Nodes
+                    DEFINE TABLE node SCHEMAFULL;
+                    DEFINE FIELD first_seen ON TABLE node TYPE datetime DEFAULT time::now();
+                    DEFINE FIELD last_seen  ON TABLE node TYPE datetime DEFAULT time::now();
+                    DEFINE INDEX node_addr  ON TABLE node COLUMNS id UNIQUE;
+                    
+                    -- 2. Announce Events (The Log)
+                    DEFINE TABLE announce SCHEMAFULL;
+                    DEFINE FIELD destination    ON TABLE announce TYPE record<node>;
+                    DEFINE FIELD transport_node ON TABLE announce TYPE option<record<node>>;
+                    DEFINE FIELD iface          ON TABLE announce TYPE string;
+                    DEFINE FIELD hops           ON TABLE announce TYPE int;
+                    DEFINE FIELD timestamp      ON TABLE announce TYPE datetime DEFAULT time::now();
+                    
+                    -- Index for fast "Give me history for Node X" queries
+                    DEFINE INDEX announce_dest ON TABLE announce COLUMNS destination;
 
-//                     DEFINE FIELD hops          ON TABLE path_table TYPE int;
-//                     DEFINE FIELD iface         ON TABLE path_table TYPE string;
-//                     DEFINE FIELD received_from ON TABLE path_table TYPE option<string>;
-//                     DEFINE FIELD last_seen     ON TABLE path_table TYPE datetime DEFAULT time::now();
-//                 "#,
-//             )
-//             .await
-//             .unwrap();
-//     }
-//     db
-// }
+                    -- For the "last_seen" logic in the UPSERT
+                    DEFINE INDEX idx_node_id ON TABLE node COLUMNS id UNIQUE;
+                    
+                    -- For the "history" and deduplication check
+                    -- This makes 'WHERE destination = ... ORDER BY timestamp' instant
+                    DEFINE INDEX idx_announce_lookup ON TABLE announce COLUMNS destination, timestamp;
 
-pub fn db_serve() {}
-
-#[derive(Debug, Serialize, Deserialize, SurrealValue, Clone)]
-pub struct PathEntryWrapper {
-    id: RecordId,
-    hops: u8,
-    received_from: Option<String>,
-    iface: String,
+                "#,
+            )
+            .await
+            .unwrap();
+    }
+    db
 }
-
-// pub async fn sync_path_table(
-//     db: &Surreal<Client>,
-//     entries: Vec<PathEntryWrapper>,
-// ) -> surrealdb::Result<()> {
-//     let a = db
-//         .query(
-//             r#"
-//         -- Insert only if record doesn't exist yet
-//         INSERT IGNORE INTO path_table $data;
-
-//         -- Update existing records only if conditions are met
-//         FOR $entry IN $data {
-//             UPDATE $entry.id
-//             SET
-//                 hops          = $entry.hops,
-//                 iface         = $entry.iface,
-//                 received_from = $entry.received_from,
-//                 last_seen     = time::now()
-//             WHERE
-//                 (time::now() - last_seen) > 1h
-//                 OR $entry.hops <= hops;
-//         };
-//     "#,
-//         )
-//         .bind(("data", entries))
-//         .await?
-//         .check();
-//     match a {
-//         Ok(_) => {}
-//         Err(e) => {
-//             log::error!("{:?}", e);
-//         }
-//     }
-
-//     Ok(())
-// }
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -117,10 +85,12 @@ where
 
     let config: Config = toml::from_str(&config_str).expect("Failed to parse TOML");
 
-    let mut counter = 0;
+    // let mut counter = 0;
+    let (mut started, mut skipped) = (0, 0);
 
     for iface in config.interfaces {
         if !iface.enabled {
+            skipped += 1;
             continue;
         }
 
@@ -133,21 +103,52 @@ where
                     TcpClient::new(format!("{}:{}", host, port)),
                     TcpClient::spawn,
                 );
-                info!("spawning an iface with: {}:{} @ {}", host, port, a);
-                counter += 1;
+                info!("new iface: <{}> @ {}:{}", a.to_hex_string(), host, port);
+                started += 1;
             }
 
             other => {
+                skipped += 1;
                 warn!("Unsupported interface type: {}", other);
             }
         }
     }
-    info!("{} interfaces started!", counter);
+    info!(started = started, skipped = skipped, "Interfaces started!");
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct AnnounceData {
+    pub hops: u8,
+    pub transport_node: Option<AddressHash>,
+    pub destination: AddressHash,
+    pub iface: AddressHash,
+}
+
+#[derive(Serialize, SurrealValue)]
+struct DbAnnounce {
+    hops: u8,
+    transport_node: Option<String>,
+    destination: String,
+    iface: String,
+}
+
+impl From<AnnounceData> for DbAnnounce {
+    fn from(data: AnnounceData) -> Self {
+        Self {
+            hops: data.hops,
+            transport_node: data.transport_node.map(|h| h.to_hex_string()),
+            destination: data.destination.to_hex_string(),
+            iface: data.iface.to_hex_string(),
+        }
+    }
+}
+
+#[allow(dead_code)]
 #[instrument]
 pub async fn router() {
     info!("router started");
+    let db = db_init().await;
 
     // Init transport
     let transport = Transport::new(TransportConfig::new(
@@ -163,76 +164,127 @@ pub async fn router() {
     )
     .await;
 
-    // take care of the all the messages
-    // ERROR: fucking deadlock again
+    let (tx, mut rx) = mpsc::channel::<AnnounceData>(100);
 
-    // let mut announce_rx = transport.recv_announces().await;
-    // trace!("here");
-    // let mut iface_rx_maybe = transport.iface_rx();
+    // batcher task
+    tokio::spawn(async move {
+        let mut batch = Vec::new();
+        let mut timer = interval(Duration::from_secs(5));
 
-    // loop {
-    //     // trace!("maybe here?");
-    //     match iface_rx_maybe.recv().await {
-    //         Ok(ok) => {
-    //             // debug!("address: {}", ok.address);
-    //             match ok.packet.header.packet_type {
-    //                 reticulum::packet::PacketType::Announce => {
-    //                     // info!("address: {}", ok.address)
-    //                     // info!(
-    //                     //     "dest: {}, distance: {}",
-    //                     //     ok.packet.destination, ok.packet.header.hops
-    //                     // )
-    //                     info!(
-    //                         iface = %ok.address.to_hex_string(),
-    //                         destination = %ok.packet.destination.to_hex_string(),
-    //                         via = ?ok.packet.transport.map(|h| h.to_hex_string()),
-    //                         hops = ?ok.packet.header.hops, // field name may differ
-    //                         "announce"
-    //                     );
-    //                 }
-    //                 _ => {
-    //                     debug!("discard")
-    //                 }
-    //             }
-    //         }
-    //         Err(broadcast::error::RecvError::Lagged(n)) => {
-    //             warn!("Lagged behind by {} messages, continuing", n);
-    //             // Don't break — just keep going
-    //         }
-    //         Err(e) => {
-    //             error!("Fatal error: {}", e);
-    //             break;
-    //         }
-    //     }
-    // }
-    let mut announce = transport.recv_announces().await;
-
-    loop {
-        match announce.recv().await {
-            Ok(ok) => {
-                trace!(
-                    // distance
-                    hops = ok.packet.header.hops,
-                    // which node did it come from. If None then the node itself was the sender
-                    transport_node = format_args!(
-                        "<{}>",
-                        ok.packet
-                            .transport
-                            .map(|h| h.to_hex_string())
-                            .unwrap_or_else(|| "Self".to_string())
-                    ),
-                    // the actual destination
-                    destination = format_args!("<{}>", ok.packet.destination.to_hex_string()),
-                    // descriptor
-                    "Announce Trace"
-                );
-            }
-            Err(e) => {
-                error!("Error: {}", e);
+        loop {
+            tokio::select! {
+                Some(data) = rx.recv() => {
+                    batch.push(data);
+                    // flush early if batch is huge
+                    if batch.len() >= 1000 {
+                        flush_to_db(&db, &mut batch).await;
+                    }
+                }
+                _ = timer.tick() => {
+                    if !batch.is_empty() {
+                        flush_to_db(&db, &mut batch).await;
+                    }
+                }
             }
         }
+    });
+
+    // send announces to the batcher task
+    let mut announce_receiver = transport.recv_announces().await;
+    while let Ok(ok) = announce_receiver.recv().await {
+        // format data
+        let data = AnnounceData {
+            hops: ok.packet.header.hops,
+            transport_node: ok.packet.transport,
+            destination: ok.packet.destination,
+            iface: ok.iface,
+        };
+
+        debug!(
+            hops = data.hops,
+            iface = format_args!("<{}>", data.iface.to_hex_string()),
+            transport_node = format_args!(
+                "<{}>",
+                data.transport_node
+                    .map(|h| h.to_hex_string())
+                    .unwrap_or_else(|| "Self".to_string())
+            ),
+            destination = format_args!("<{}>", data.destination.to_hex_string()),
+            "Announce Trace"
+        );
+
+        // send to batcher (non-blocking)
+        let _ = tx.send(data).await;
     }
 
     // let _ = tokio::signal::ctrl_c().await;
     // info!("Shutting down...");
+}
+
+async fn flush_to_db(db: &Surreal<Client>, batch: &mut Vec<AnnounceData>) {
+    if batch.is_empty() {
+        debug!("Announce Entries are empty. Nothing to give to the db");
+        return;
+    }
+
+    let original_data = std::mem::take(batch);
+
+    // par_iter might be interesting here, not sure of the performance benefits tho
+    let data_to_send: Vec<DbAnnounce> = original_data.into_iter().map(DbAnnounce::from).collect();
+
+    // this was created in large part by gemini
+    // seems alright tho
+    let query = r#"
+        FOR $entry IN $data {
+            -- 1. Heartbeat for the Destination Node
+            UPSERT type::record("node", $entry.destination) 
+            SET last_seen = time::now();
+
+            -- 2. Heartbeat for the Relay Node (if it exists)
+            IF $entry.transport_node != NONE {
+                UPSERT type::record("node", $entry.transport_node) 
+                SET last_seen = time::now();
+            };
+
+            -- 3. Smart Announce Logic
+            LET $dest_id = type::record("node", $entry.destination);
+            LET $relay_id = IF $entry.transport_node != NONE { 
+                type::record("node", $entry.transport_node) 
+            } ELSE { 
+                NONE 
+            };
+
+            LET $last = (
+                SELECT id, hops, transport_node, timestamp
+                FROM announce 
+                WHERE destination = $dest_id 
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            )[0];
+
+            IF !$last OR $last.hops != $entry.hops OR $last.transport_node != $relay_id {
+                CREATE announce SET
+                    destination = $dest_id,
+                    transport_node = $relay_id,
+                    hops = $entry.hops,
+                    iface = $entry.iface,
+                    timestamp = time::now();
+            } ELSE {
+                UPDATE $last.id SET timestamp = time::now();
+            };
+        };
+    "#;
+
+    match db.query(query).bind(("data", data_to_send)).await {
+        Ok(response) => {
+            // check for errors in the response
+            if let Err(e) = response.check() {
+                error!(error = %e, "Batch query execution failed");
+            } else {
+                trace!("Batch sync complete");
+            }
+        }
+        Err(e) => error!(error = %e, "Failed to send batch query"),
+    }
+    batch.clear();
 }
