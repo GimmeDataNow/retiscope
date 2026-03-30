@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -13,6 +15,8 @@ use surrealdb::opt::auth::Root;
 use surrealdb::{self, Surreal};
 use surrealdb_types::SurrealValue;
 
+use crate::errors::RetiscopeError;
+use crate::files;
 use serde::{Deserialize, Serialize};
 
 pub async fn db_init() -> Surreal<Client> {
@@ -23,6 +27,7 @@ pub async fn db_init() -> Surreal<Client> {
     })
     .await
     .unwrap();
+    // db.select("announce").live()
     db.use_ns("main").use_db("main").await.unwrap();
     {
         let _ = db
@@ -75,17 +80,18 @@ struct InterfaceConfig {
 }
 
 #[instrument(skip(transport, path))]
-pub async fn add_transport_routes<P>(transport: &Transport, path: P)
-where
-    P: AsRef<std::path::Path> + std::fmt::Debug,
-{
-    info!("adding transport nodes");
+pub async fn add_transport_routes(
+    transport: &Transport,
+    path: PathBuf,
+) -> Result<(), RetiscopeError> {
+    info!(path = path.to_str(), "adding transport nodes");
 
     let config_str = std::fs::read_to_string(path).unwrap();
 
-    let config: Config = toml::from_str(&config_str).expect("Failed to parse TOML");
+    let config: Config = toml::from_str(&config_str)
+        .inspect_err(|_| error!("failed to parse connections"))
+        .map_err(|_| RetiscopeError::FailedToParse)?;
 
-    // let mut counter = 0;
     let (mut started, mut skipped) = (0, 0);
 
     for iface in config.interfaces {
@@ -114,6 +120,7 @@ where
         }
     }
     info!(started = started, skipped = skipped, "Interfaces started!");
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -158,9 +165,14 @@ pub async fn router() {
     ));
 
     // this is just plain bad but I will have to redo this later regardless
-    add_transport_routes(
-        &transport,
-        "/home/hallow/.local/share/retiscope/connections.toml",
+    // files
+    let paths = files::get_paths();
+    let path = paths.config.join("connections.toml");
+    files::ensure_file(&path);
+
+    let _ = add_transport_routes(
+        &transport, // "/home/hallow/.local/share/retiscope/connections.toml",
+        path,
     )
     .await;
 

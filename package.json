@@ -12,6 +12,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@antv/g6": "^5.0.51",
     "@solidjs/router": "^0.15.4",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",

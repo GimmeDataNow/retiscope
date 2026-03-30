@@ -183,3 +183,6 @@ pub async fn get_announces(
     Ok(announces)
 }
 ```
+
+hops = 0 means it is on the same local hub (hearing your own announce)
+hubs do not count as hops themselves if there a local node is trying to connect to somewhere else.
