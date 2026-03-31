@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-mod cli;
+pub mod cli;
 mod errors;
 mod files;
 

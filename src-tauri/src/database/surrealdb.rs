@@ -1,0 +1,158 @@
+use tracing::{debug, error, info, instrument, trace, warn};
+
+use crate::database::data::AnnounceData;
+use crate::database::data::DBAnnounce;
+
+use crate::database::data::RetiscopeDB;
+use crate::errors::RetiscopeError;
+use async_trait::async_trait;
+use surrealdb::Surreal;
+
+use surrealdb::opt::auth::Root;
+#[cfg(feature = "surrealdb")]
+use surrealdb::Connection;
+
+#[cfg(feature = "surrealdb")]
+pub struct SurrealImpl<C: Connection> {
+    pub connection: surrealdb::Surreal<C>,
+}
+
+#[cfg(feature = "surrealdb")]
+#[async_trait]
+impl<C: Connection> RetiscopeDB for SurrealImpl<C> {
+    async fn set_up_db(&self) -> Result<(), RetiscopeError> {
+        todo!()
+    }
+    async fn init_db(&self) -> Result<(), RetiscopeError> {
+        // sign in
+        self.connection
+            .signin(Root {
+                username: "a".into(),
+                password: "a".into(),
+            })
+            .await
+            .inspect_err(|e| error!(error = %e , "Failed to singn in"))
+            .map_err(|_| RetiscopeError::FailedToSignIn)?;
+
+        // set the correct
+        self.connection
+            .use_ns("retiscope")
+            .use_db("network")
+            .await
+            .inspect_err(|e| error!(error = %e, "Failed to connect to database"))
+            .map_err(|_| RetiscopeError::FailedToConnectToDB)?;
+
+        {
+            let _ = self.connection
+            .query(
+                r#"
+                    -- 1. Unique Nodes
+                    DEFINE TABLE node SCHEMAFULL;
+                    DEFINE FIELD first_seen ON TABLE node TYPE datetime DEFAULT time::now();
+                    DEFINE FIELD last_seen  ON TABLE node TYPE datetime DEFAULT time::now();
+                    DEFINE INDEX node_addr  ON TABLE node COLUMNS id UNIQUE;
+                    
+                    -- 2. Announce Events (The Log)
+                    DEFINE TABLE announce SCHEMAFULL;
+                    DEFINE FIELD destination    ON TABLE announce TYPE record<node>;
+                    DEFINE FIELD transport_node ON TABLE announce TYPE option<record<node>>;
+                    DEFINE FIELD iface          ON TABLE announce TYPE string;
+                    DEFINE FIELD hops           ON TABLE announce TYPE int;
+                    DEFINE FIELD timestamp      ON TABLE announce TYPE datetime DEFAULT time::now();
+                    
+                    -- Index for fast "Give me history for Node X" queries
+                    DEFINE INDEX announce_dest ON TABLE announce COLUMNS destination;
+
+                    -- For the "last_seen" logic in the UPSERT
+                    DEFINE INDEX idx_node_id ON TABLE node COLUMNS id UNIQUE;
+                    
+                    -- For the "history" and deduplication check
+                    -- This makes 'WHERE destination = ... ORDER BY timestamp' instant
+                    DEFINE INDEX idx_announce_lookup ON TABLE announce COLUMNS destination, timestamp;
+
+                "#,
+            )
+            .await
+            .inspect_err(|e| error!(error = %e, "Failed to send query"))
+            .map_err(|_| RetiscopeError::FailedToSendQuery)?;
+        }
+
+        Ok(())
+    }
+
+    async fn save_announces(&self, data: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError> {
+        if data.is_empty() {
+            debug!("Announce Entries are empty. Nothing to give to the db");
+            return Ok(());
+        }
+        // clears the data
+        let original_data = std::mem::take(data);
+
+        let data_to_send: Vec<DBAnnounce> =
+            original_data.into_iter().map(DBAnnounce::from).collect();
+
+        // this was created in large part by gemini
+        // seems alright tho
+        let query = r#"
+            FOR $entry IN $data {
+                -- 1. Heartbeat for the Destination Node
+                UPSERT type::record("node", $entry.destination) 
+                SET last_seen = time::now();
+    
+                -- 2. Heartbeat for the Relay Node (if it exists)
+                IF $entry.transport_node != NONE {
+                    UPSERT type::record("node", $entry.transport_node) 
+                    SET last_seen = time::now();
+                };
+    
+                -- 3. Smart Announce Logic
+                LET $dest_id = type::record("node", $entry.destination);
+                LET $relay_id = IF $entry.transport_node != NONE { 
+                    type::record("node", $entry.transport_node) 
+                } ELSE { 
+                    NONE 
+                };
+    
+                LET $last = (
+                    SELECT id, hops, transport_node, timestamp
+                    FROM announce 
+                    WHERE destination = $dest_id 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                )[0];
+    
+                IF !$last OR $last.hops != $entry.hops OR $last.transport_node != $relay_id {
+                    CREATE announce SET
+                        destination = $dest_id,
+                        transport_node = $relay_id,
+                        hops = $entry.hops,
+                        iface = $entry.iface,
+                        timestamp = time::now();
+                } ELSE {
+                    UPDATE $last.id SET timestamp = time::now();
+                };
+            };
+        "#;
+        // send query and log result
+        self.connection
+            .query(query)
+            .bind(("data", data_to_send))
+            .await
+            // check if it failed to send
+            .inspect_err(|e| error!(error = %e, "Failed to send batch query"))
+            // check if the query executed properly
+            .and_then(|response| {
+                response
+                    .check()
+                    .inspect(|_| trace!("Batch sync complete"))
+                    .inspect_err(|e| error!(error = %e, "Batch query execution failed"))
+            })
+            .map_err(|_| RetiscopeError::FailedQuery)?;
+
+        Ok(())
+    }
+}
+
+impl SurrealImpl<_> {
+    pub fn new(address: String, port: u16, use_tls: bool) -> Self {}
+}

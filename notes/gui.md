@@ -128,4 +128,14 @@ identity might solve this.
 Another issue would be that a node might get managed by two managers at the same time. Thus a
 locking mechanism may be needed. This locking mechanism might need periodic timeouts due to
 deadlocks being a possibility.
+Clock drift for each of the devices may be an issue. As such timelines may look broken. Updating
+the local clock using the manager may be needed.
+Inclusion of a SNR/RSSI metric for each announce may be helpful for industrial applications.
+
+### Hardware acceleration
+
+use a CAAM (Cryptographic Acceleration and Assurance Module) to speed up reticulum
+use a gpu compute shader to speed up reticulum
+
+At this point a TSDB (Time-Series Database) may be needed.
 
