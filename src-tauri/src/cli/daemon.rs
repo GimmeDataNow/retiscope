@@ -5,18 +5,18 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use rand_core::OsRng;
-use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
 
-use surrealdb::engine::remote::ws::{Client, Ws};
-use surrealdb::opt::auth::Root;
 use surrealdb::{self, Surreal};
-use surrealdb_types::SurrealValue;
 
+// use crate::database;
+use crate::database::data::AnnounceData;
 use crate::errors::RetiscopeError;
-use crate::files;
+use crate::files::get_paths;
+use crate::{database, files};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -80,8 +80,13 @@ pub async fn add_transport_routes(
 #[allow(dead_code)]
 #[instrument]
 pub async fn run() {
-    info!("router started");
-    let db = db_init().await;
+    info!("Daemon started");
+    // database
+    let db_config_path = get_paths().config.join("database.toml");
+    let db_config = database::load_database_config(db_config_path);
+    let db = db_config.create_db().await.unwrap();
+    // this is needed
+    let _ = db.init_db().await;
 
     // configure the transport
     let mut transport_config = TransportConfig::new(
@@ -119,12 +124,12 @@ pub async fn run() {
                     batch.push(data);
                     // flush early if batch is huge
                     if batch.len() >= 1000 {
-                        flush_to_db(&db, &mut batch).await;
+                        let _ = db.save_announces(&mut batch).await;
                     }
                 }
                 _ = timer.tick() => {
                     if !batch.is_empty() {
-                        flush_to_db(&db, &mut batch).await;
+                        let _ = db.save_announces(&mut batch).await;
                     }
                 }
             }

@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 pub mod cli;
+pub mod database;
 mod errors;
 mod files;
 

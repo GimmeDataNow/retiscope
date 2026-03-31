@@ -12,14 +12,17 @@ use surrealdb::opt::auth::Root;
 #[cfg(feature = "surrealdb")]
 use surrealdb::Connection;
 
+use surrealdb::engine::any::{connect, Any};
+
+#[derive(Debug)]
 #[cfg(feature = "surrealdb")]
-pub struct SurrealImpl<C: Connection> {
-    pub connection: surrealdb::Surreal<C>,
+pub struct SurrealImpl {
+    pub connection: surrealdb::Surreal<Any>,
 }
 
 #[cfg(feature = "surrealdb")]
 #[async_trait]
-impl<C: Connection> RetiscopeDB for SurrealImpl<C> {
+impl RetiscopeDB for SurrealImpl {
     async fn set_up_db(&self) -> Result<(), RetiscopeError> {
         todo!()
     }
@@ -36,8 +39,8 @@ impl<C: Connection> RetiscopeDB for SurrealImpl<C> {
 
         // set the correct
         self.connection
-            .use_ns("retiscope")
-            .use_db("network")
+            .use_ns("main")
+            .use_db("main")
             .await
             .inspect_err(|e| error!(error = %e, "Failed to connect to database"))
             .map_err(|_| RetiscopeError::FailedToConnectToDB)?;
@@ -80,6 +83,7 @@ impl<C: Connection> RetiscopeDB for SurrealImpl<C> {
         Ok(())
     }
 
+    #[instrument(skip(self, data))]
     async fn save_announces(&self, data: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError> {
         if data.is_empty() {
             debug!("Announce Entries are empty. Nothing to give to the db");
@@ -153,6 +157,27 @@ impl<C: Connection> RetiscopeDB for SurrealImpl<C> {
     }
 }
 
-impl SurrealImpl<_> {
-    pub fn new(address: String, port: u16, use_tls: bool) -> Self {}
+impl SurrealImpl {
+    pub async fn new(
+        address: &str,
+        port: &u16,
+        use_tls: bool,
+        namespace: &str,
+        database: &str,
+    ) -> Result<Self, RetiscopeError> {
+        let protocol = if use_tls { "wss" } else { "ws" };
+        let endpoint = format!("{}://{}:{}", protocol, address, port);
+
+        // The 'connect' function from the 'any' engine is magic
+        let db = connect(endpoint)
+            .await
+            .map_err(|_| RetiscopeError::FailedToConnectToDB)?;
+
+        db.use_ns(namespace)
+            .use_db(database)
+            .await
+            .map_err(|_| RetiscopeError::FailedToConfigureDB)?;
+
+        Ok(Self { connection: db })
+    }
 }
