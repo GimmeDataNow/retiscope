@@ -43,38 +43,39 @@ This will work as an alternative to existing http status codes as they are not f
 ```rust
 #[repr(u8)]
 pub enum RetiscopeStatus {
-    // Success
-    Success = 0x00,
-    DataFollows = 0x01,
-    PARTIAL_CONTENT = 0x02,
-    CACHED_RESPONSE = 0x03, // "I'm the middleman. Here's the last thing I heard." (used for anchors or aggregators)
-    STALE_DATA = 0x04, // "I'm the source. I'm alive, but my sensors are stuck."
+    // --- 0x00: Success & Informational ---
+    Success              = 0x00,
+    DataFollows          = 0x01,
+    PartialContent       = 0x02,
+    PotentiallyDead      = 0x03,      // Anchor: "Link dropped recently, path might still exist"
+    StaleData            = 0x04,      // Service: "I'm alive, but my sensor data is old"
 
-    // Async
-    Processing = 0x20, // equivalent to HTTP 102 (Processing),
-    QUEUED = 0x21,
-    DEPENDENCY_WAIT = 0x22, // "waiting for dependencies to finish"
-    UPGRADING = 0x23 // Flahsing new firmware, do not interrupt
+    // --- 0x20: Async & Lifecycle ---
+    Processing           = 0x20,       // Keep-alive: "I'm working on it"
+    Queued               = 0x21,       // "You're in line behind other Managers"
+    DependencyWait       = 0x22,       // "Waiting for another node to respond"
+    Upgrading            = 0x23,       // "Flashing firmware, do not interrupt"
     
-    // Client Side
-    BadRequest = 0x40,
-    MfaRequired = 0x42, // The 2FA Challenge we discussed
-    AccessDenied = 0x43,
-    PAYLOAD_TOO_LARGE = 0x44,
-    RATE_LIMITED = 0x45,
-    IDEMPOTENCY_VIOLATION = 0x46, // "Stop sending duplicate commands!"
+    // --- 0x40: Client/Request Errors ---
+    BadRequest           = 0x40,       // Malformed command
+    NotFound             = 0x41,       // Resource/Command doesn't exist
+    MfaRequired          = 0x42,       // Identity verified, but need 2FA signature
+    AccessDenied         = 0x43,       // Identity lacks permissions
+    PayloadTooLarge      = 0x44,       // Exceeds MTU or Node RAM
+    RateLimited          = 0x45,       // "You are talking too fast for this radio link"
+    IdempotencyViolation = 0x46,       // "Already processed this Command ID"
+
+    // --- 0x60: Node/Hardware Errors ---
+    InternalError        = 0x60,       // General software crash/DB error
+    LowPowerMode         = 0x61,       // "Battery too low to perform this action"
+    HardwareFault        = 0x62,       // "Sensor (I2C/GPIO) is physically unresponsive"
+    MemoryExhausted      = 0x63,       // "Node ran out of RAM trying to process this"
+    StorageFull          = 0x64,       // SD Card/Disk at capacity
 
 
-    // Node/Environment Side
-    DbError = 0x60,
-    StorageFull = 0x61,
-    LOW_POWER_MODE = 0x62,
-    HARDWARE_FAULT = 0x63, // "cant provide data because sensor died"
-    STORAGE_FULL = 0x64,
-
-
-    // Mesh Side (Unique to Retiscope)
-    PathLost = 0x80,
-    LinkCongested = 0x82, // "Too many managers, try again later"
+    // --- 0x80: Mesh/Transport Errors (Manager-Side Detected) ---
+    PathLost             = 0x80,       // No route to destination
+    LinkTimeout          = 0x81,       // Encrypted tunnel collapsed
+    LinkCongested        = 0x82,       // "Medium is saturated, try later"
 }
 ```
