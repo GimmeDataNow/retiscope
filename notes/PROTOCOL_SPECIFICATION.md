@@ -19,9 +19,10 @@ All Retiscope-enabled nodes must include a specific app_data payload in their RN
 **Flags**:
 | Bit        | Name             |	Description                                          |
 | ---------- | ---------------- | ---------------------------------------------------- |
-| 1          |	IS_SERVER       |	Node serves data/logs (Retiscope Service).           |
-| 2          |	TRUSTED_ONLY    |	Connection requires Identity authentication.         |
-| 3          |	MFA_REQUIRED    |	MFA signing may be required to access all feature.   |
-| 4          |	REQUIRES_AUTH   |	Connection requires Password authentication.         |
-| 5          |	MANAGEABLE	    | Node accepts remote configuration commands.          |
-| 8          |	LOW_B_W	        | Node is on a low-bandwidth link (LoRa/HF).           |
+| 1          |	IS_ANCHOR       |	Node serves data/logs (Retiscope Service).           |
+| 2          |	IS_SERVER       |	Node serves data/logs (Retiscope Service).           |
+| 3          |	TRUSTED_ONLY    |	Connection requires Identity authentication.         |
+| 4          |	MFA_REQUIRED    |	MFA signing may be required to access all feature.   |
+| 5          |	REQUIRES_AUTH   |	Connection requires Password authentication.         |
+| 6          |	MANAGEABLE	    | Node accepts remote configuration commands.          |
+| 7          |	LOW_B_W	        | Node is on a low-bandwidth link (LoRa/HF).           |
