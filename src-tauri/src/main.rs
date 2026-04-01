@@ -1,28 +1,14 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tracing::{error, info};
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
 use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter};
 
 use clap::Parser;
 
-use crate::files::save_identity;
-
 mod arguments;
-mod cli;
-pub mod database;
-pub mod errors;
-pub mod files;
-
-// #[derive(Parser)]
-// #[command(name = "retiscope")]
-// #[command(about = "A Reticulum Network Explorer", long_about = None)]
-// #[command(version)]
-// struct Args {
-//     /// Use CLI
-//     #[arg(long)]
-//     cli: bool,
-// }
 
 #[tokio::main]
 async fn main() {
@@ -34,23 +20,12 @@ async fn main() {
         .with(fmt::layer().with_target(false)) // prints to stdout/stderr
         .init();
 
-    // // args
-    // let args = Args::parse();
-    // if args.cli {
-    //     cli::router().await;
-    // } else {
-    //     info!("gui started");
-    //     retiscope_lib::run()
-    // }
-    // args
     let args = arguments::Args::parse();
 
     match args.command {
         arguments::Commands::Daemon => {
             info!("Starting daemon...");
-            // run_daemon();
-            // cli::router().await;
-            cli::daemon::run().await;
+            retiscope_lib::cli::listener::run().await;
         }
         arguments::Commands::Service => {
             info!("Starting service...");

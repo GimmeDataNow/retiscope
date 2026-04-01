@@ -1,38 +1,98 @@
+//! The Network Ingestor and Telemetry Coordinator.
+//!
+//! This module serves as the primary bridge between the Reticulum Network and the
+//! Retiscope database. It is responsible for initializing the transport layer,
+//! managing network interfaces, and capturing `Announce` packets for long-term storage.
+//!
+//! # Architecture
+//!
+//! The ingestor operates using a **Split-Task Architecture**:
+//!
+//! 1. **Capture Loop**: The main `run` loop asynchronously receives raw announces
+//!    from the Reticulum `Transport`. It performs lightweight formatting into
+//!    [`AnnounceData`] and pushes them into an internal MPSC channel.
+//!
+//! 2. **Batcher Task**: An independent background task drains the channel and
+//!    aggregates data into batches.
+//!
+//! # Features
+//!
+//! * **Interface Management**: Dynamically loads and spawns Reticulum interfaces
+//!   (e.g., `TCPClientInterface`) based on a `connections.toml` configuration file.
+//! * **Batching**: Flushes data to the database either when a
+//!   threshold of 1000 records is met or when a 5-second "heartbeat" timer expires.
+//!
+//! # Future Expansion
+//!
+//! This module is designed to evolve into a **Management Nexus**, capable of
+//! not just observing announces, but also issuing remote management commands
+//! and monitoring service health across the network.
+//!
+//! # Errors
+//!
+//! Failures in interface spawning or configuration parsing are logged as
+//! warnings or errors but generally do not halt the entire ingestion process.
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info, instrument, trace, warn};
 
+// OsRng is used for the creation of the identity
 use rand_core::OsRng;
+use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
 use reticulum::transport::{Transport, TransportConfig};
 
-use surrealdb::{self, Surreal};
+use crate::data::database::{self, RetiscopeDB};
+use crate::data::AnnounceData;
 
-// use crate::database;
-use crate::database::data::AnnounceData;
 use crate::errors::RetiscopeError;
-use crate::files::get_paths;
-use crate::{database, files};
+use crate::files;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
+/// Configuration for the network transport layer.
+///
+/// This structure represents the `connections.toml` file used to define
+/// how Retiscope connects to the wider Reticulum network.
 #[derive(Debug, Deserialize)]
 struct Config {
+    /// A collection of individual interface definitions.
     interfaces: Vec<InterfaceConfig>,
 }
 
+/// Parameters for a specific Reticulum interface.
+///
+/// Maps directly to the TOML configuration. Currently supports `TCPClientInterface`.
 #[derive(Debug, Deserialize)]
 struct InterfaceConfig {
+    /// The type of interface (e.g., "TCPClientInterface").
     #[serde(rename = "type")]
     iface_type: String,
+    /// Whether this interface should be initialized on startup.
     enabled: bool,
+    /// The remote IP or hostname for TCP-based connections.
     target_host: Option<String>,
+    /// The remote port for TCP-based connections.
     target_port: Option<u16>,
 }
 
+/// Dynamically initializes network routes based on a configuration file.
+///
+/// This function parses the provided TOML file and spawns active interfaces
+/// into the Reticulum [`Transport`] instance.
+///
+/// # Arguments
+/// * `transport` - A reference to the initialized Reticulum transport layer.
+/// * `path` - The filesystem path to the `connections.toml` file.
+///
+/// # Errors
+/// Returns [`RetiscopeError::FailedToParse`] if the config is malformed.
 #[instrument(skip(transport, path))]
 pub async fn add_transport_routes(
     transport: &Transport,
@@ -77,14 +137,27 @@ pub async fn add_transport_routes(
     Ok(())
 }
 
+/// The primary entry point for the network observation and database ingestion service.
+///
+/// This function orchestrates the entire lifecycle of the ingestor:
+/// 1. Initializes the database connection from `database.toml`.
+/// 2. Configures and starts the Reticulum [`Transport`] layer.
+/// 3. Establishes network interfaces via [`add_transport_routes`].
+/// 4. Spawns a background **Batcher Task** to aggregate announces.
+/// 5. Enters a high-frequency loop to capture and relay network telemetry.
+///
+/// # Batching Behavior
+/// To optimize database performance, announces are not written immediately. Instead:
+/// * They are flushed every **5 seconds** if any are pending.
+/// * They are flushed immediately if the buffer reaches **1000 records**.
 #[allow(dead_code)]
 #[instrument]
 pub async fn run() {
-    info!("Daemon started");
+    info!("Listener started");
     // database
-    let db_config_path = get_paths().config.join("database.toml");
+    let db_config_path = files::get_paths().config.join("database.toml");
     let db_config = database::load_database_config(db_config_path);
-    let db = db_config.create_db().await.unwrap();
+    let db: Arc<dyn RetiscopeDB> = db_config.create_db().await.unwrap();
     // this is needed
     let _ = db.init_db().await;
 
@@ -153,7 +226,7 @@ pub async fn run() {
             transport_node = format_args!(
                 "<{}>",
                 data.transport_node
-                    .map(|h| h.to_hex_string())
+                    .map(|h: AddressHash| h.to_hex_string())
                     .unwrap_or_else(|| "Self".to_string())
             ),
             destination = format_args!("<{}>", data.destination.to_hex_string()),

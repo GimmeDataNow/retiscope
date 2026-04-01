@@ -1,18 +1,26 @@
+//! SurrealDB backend implementation for Retiscope.
+//!
+//! This module implements the [`RetiscopeDB`] trait using the SurrealDB `any` engine,
+//! allowing for connections via WebSocket (WS/WSS), HTTP, or local file storage.
+//!
+//! # Schema
+//! The implementation handles two main entities:
+//! * `node`: Tracks unique network participants and their last-seen heartbeats.
+//! * `announce`: A log of network announcements.
+//!
+//! # Performance
+//! The [`SurrealImpl::save_announces`] method uses a batched UPSERT logic to minimize
+//! round-trips to the database, ensuring efficient ingestion of high-frequency data.
+#[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::database::data::AnnounceData;
-use crate::database::data::DBAnnounce;
-
-use crate::database::data::RetiscopeDB;
+use crate::data::{database::RetiscopeDB, AnnounceData, DBAnnounce};
 use crate::errors::RetiscopeError;
-use async_trait::async_trait;
-use surrealdb::Surreal;
 
-use surrealdb::opt::auth::Root;
-#[cfg(feature = "surrealdb")]
-use surrealdb::Connection;
+use async_trait::async_trait;
 
 use surrealdb::engine::any::{connect, Any};
+use surrealdb::opt::auth::Root;
 
 #[derive(Debug)]
 #[cfg(feature = "surrealdb")]

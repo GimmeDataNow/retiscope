@@ -1,17 +1,53 @@
-use std::fs;
-
-use crate::database::data::RetiscopeDB;
-use crate::errors::RetiscopeError;
-use crate::files::{ensure_file, get_paths};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Arc;
-
-// use tracing::{instrument, warn};
+#[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
-pub mod data;
+use async_trait::async_trait;
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+use std::sync::Arc;
+
+use crate::data::AnnounceData;
+use crate::errors::RetiscopeError;
+
 pub mod surrealdb;
+
+#[async_trait]
+pub trait RetiscopeDB: Send + Sync {
+    /// Initializes the database schema and administrative users.
+    ///
+    /// This method ensures the database is in a ready state by:
+    /// * Applying required table schemas and indexes.
+    /// * Provisioning internal system users and permissions.
+    ///
+    /// # Errors
+    ///
+    /// TODO
+    async fn set_up_db(&self) -> Result<(), RetiscopeError>;
+    /// Prepares the database for use.
+    ///
+    /// This method ensures the correct database state by:
+    /// * Logging into the correct user.
+    /// * Selecting the right namespace and database.
+    ///
+    /// # Errors
+    ///
+    /// TODO
+    async fn init_db(&self) -> Result<(), RetiscopeError>;
+
+    /// Writes the announces to the database.
+    ///
+    /// This method writes this data by:
+    /// * Upserting each announce
+    /// * Upserting each node and the respective timestamps
+    ///
+    /// # Errors
+    ///
+    /// TODO
+    async fn save_announces(&self, announce: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError>;
+}
 
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
