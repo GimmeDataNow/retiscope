@@ -4,6 +4,10 @@ Retiscope is a reticulum network visualizer.
 
 Retiscope supports (or will support) multi node data retreival for viewing large networks. 
 
+## Documentation
+For technical details on how Retiscope communicates, see the 
+[Protocol Specification](notes/PROTOCOL_SPECIFICATION.md).
+
 ## Features / Planned Features
 
 ### General overview
@@ -42,12 +46,6 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 - [ ] Path trace mode (Select node A → node B, Show inferred path + metrics.)
 - [ ] Partition Detection (might be difficult)
 
-### Animations
-- [ ] Hop sequence
-- [ ] Time
-- [ ] Retransmission (might be difficult)
-- [ ] interface switches
-
 ### Telemetry Model
 - Observed link (direct link established)
 - Inferred route (via routing table)
@@ -58,26 +56,6 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 
 - Reticulum - https://github.com/BeechatNetworkSystemsLtd/Reticulum-rs.git
 - Node visualization - @dschz/solid-g6
-
-## Output of the setup
-
-Your system is missing dependencies (or they do not exist in $PATH):
-╭────────────────────┬─────────────────────────────────────────────────────╮
-│ Bun                │ Visit https://bun.sh/                               │
-├────────────────────┼─────────────────────────────────────────────────────┤
-│ webkit2gtk & rsvg2 │ Visit https://tauri.app/guides/prerequisites/#linux │
-╰────────────────────┴─────────────────────────────────────────────────────╯
-
-Make sure you have installed the prerequisites for your OS: https://tauri.app/start/prerequisites/, then run:
-  cd retiscope
-  bun install
-  bun run tauri android init
-
-For Desktop development, run:
-  bun run tauri dev
-
-For Android development, run:
-  bun run tauri android dev
 
 # Development
 
