@@ -55,6 +55,9 @@ pub enum RetiscopeStatus {
     Queued               = 0x21,       // "You're in line behind other Managers"
     DependencyWait       = 0x22,       // "Waiting for another node to respond"
     Upgrading            = 0x23,       // "Flashing firmware, do not interrupt"
+    MAINTENANCE_MODE
+    MaintenanceMode      = 0x24        // "I am alive but I am in read only mode for manual servicing"
+    Rebooting            = 0x25        // Rebooting, link will drop
     
     // --- 0x40: Client/Request Errors ---
     BadRequest           = 0x40,       // Malformed command
@@ -64,13 +67,16 @@ pub enum RetiscopeStatus {
     PayloadTooLarge      = 0x44,       // Exceeds MTU or Node RAM
     RateLimited          = 0x45,       // "You are talking too fast for this radio link"
     IdempotencyViolation = 0x46,       // "Already processed this Command ID"
+    UnsupportedEncoding  = 0x47,       // "I can't read this binary format"
+    ChecksumMismatch     = 0x48,       // "The Resource transfer finished, but the SHA-256 doesn't match. Send it again"
 
     // --- 0x60: Node/Hardware Errors ---
     InternalError        = 0x60,       // General software crash/DB error
     LowPowerMode         = 0x61,       // "Battery too low to perform this action"
     HardwareFault        = 0x62,       // "Sensor (I2C/GPIO) is physically unresponsive"
     MemoryExhausted      = 0x63,       // "Node ran out of RAM trying to process this"
-    StorageFull          = 0x64,       // SD Card/Disk at capacity
+    StorageFull          = 0x64,       // Disk at capacity
+    CriticalTemp         = 0x65        // Hardware is at a critical temperature
 
 
     // --- 0x80: Mesh/Transport Errors (Manager-Side Detected) ---
