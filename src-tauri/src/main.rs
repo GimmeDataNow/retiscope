@@ -1,40 +1,45 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{thread::sleep, time};
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
+use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter};
 
 use clap::Parser;
-use log::{self, info};
 
-mod cli;
-
-#[derive(Parser)]
-#[command(name = "retiscope")]
-#[command(about = "A Reticulum Network Explorer", long_about = None)]
-#[command(version)]
-struct Args {
-    /// Launch in CLI mode instead of GUI
-    #[arg(long)]
-    cli: bool,
-}
+mod arguments;
 
 #[tokio::main]
 async fn main() {
-    tauri::async_runtime::set(tokio::runtime::Handle::current());
+    // logging
+    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=warn,surrealdb=error");
+    let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::layer().with_target(false)) // prints to stdout/stderr
+        .init();
 
-    let args = Args::parse();
-    if args.cli {
-        info!("CLI started");
-        // cli::cli_init();
-        // cli::db_init().await;
-        cli::router_init().await;
+    let args = arguments::Args::parse();
 
-        // loop {
-        //     sleep(time::Duration::from_secs(1));
-        //     info!("wow");
-        // }
-    } else {
-        info!("GUI started");
-        retiscope_lib::run()
+    match args.command {
+        arguments::Commands::Daemon => {
+            info!("Starting daemon...");
+            retiscope_lib::cli::listener::run().await;
+        }
+        arguments::Commands::Service => {
+            info!("Starting service...");
+            // run_service();
+        }
+        arguments::Commands::Database => {
+            info!("Starting database...");
+            // run_service();
+        }
+        #[cfg(feature = "gui")]
+        arguments::Commands::Gui => {
+            info!("Launching GUI...");
+            // tauri::Builder::default().run(tauri::generate_context!()).expect("error while running tauri application");
+            retiscope_lib::run();
+        }
     }
 }

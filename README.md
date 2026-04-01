@@ -78,3 +78,25 @@ For Desktop development, run:
 
 For Android development, run:
   bun run tauri android dev
+
+# Development
+
+Ensure a database is running using
+```
+surreal start --user a --pass a --bind 0.0.0.0:8000 rocksdb:$HOME/.local/share/retiscope/surreal/
+```
+> [!WARNING]
+> Depending on the version the application may immideately crash if it fails to establish a connection. 
+
+For running the listener daemon:
+```
+cd src-tauri/
+cargo run -- daemon
+```
+
+For running the GUI:
+```
+bun run tauri dev
+```
+
+

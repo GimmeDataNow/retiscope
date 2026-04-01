@@ -8,9 +8,17 @@ members = [
 [package]
 name = "retiscope"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A Reticulum Network Visualizer"
+authors = ["GimmeDataNow"]
 edition = "2021"
+
+[features]
+# The 'gui' feature is on by default
+default = ["gui", "daemon", "service", "surrealdb"]
+gui = ["tauri", "tauri-build", "tauri-plugin-opener"]
+daemon = []
+service = []
+surrealdb = []
 
 [profile.release]
 incremental = false
@@ -28,28 +36,31 @@ name = "retiscope_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true}
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+clap = { version = "4.5", features = ["derive"] }
+
+tauri = { version = "2", features = [], optional = true}
+tauri-plugin-opener = { version = "2" , optional = true}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# my dep
-# reticulum = { git = "https://github.com/GimmeDataNow/Reticulum-rs", rev = "1f959686a0be163b2cdb7e6edb994c76978b59c5"}
+# reticulum
 reticulum = {  path = "../../Reticulum-rs/"}
-
-
-log = { path = "crates/log" }
-clap = { version = "4.5", features = ["derive"] }
-tokio = "1.49.0"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 
+# tracing
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = [ "env-filter" ] }
+
+# files
+directories = "6.0.0"
+toml = "1.0.3"
+
+tokio = "1.49.0"
 # database
 surrealdb = { version = "3.0.1" }
 surrealdb-types = "3.0.1"
-toml = "1.0.3"
-chrono = { version = "0.4.44", features = [ "serde" ] }
-
-# surrealdb-server = "3.0.1"
+futures = "0.3.32"
+async-trait = "0.1.89"
