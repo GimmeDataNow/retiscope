@@ -5,8 +5,9 @@ Retiscope is a reticulum network visualizer.
 Retiscope supports (or will support) multi node data retreival for viewing large networks. 
 
 ## Documentation
-For technical details on how Retiscope communicates, see the 
-[Protocol Specification](notes/PROTOCOL_SPECIFICATION.md).
+- [Protocol Specification](notes/PROTOCOL_SPECIFICATION.md) — How nodes talk to each other.
+- [Architecture Overview](notes/ARCHITECTURE.md) — CLI vs. GUI vs. DB logic.
+- [Contributing](CONTRIBUTING.md) — How to help build Retiscope.
 
 ## Features / Planned Features
 
