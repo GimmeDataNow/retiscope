@@ -8,24 +8,24 @@ All Retiscope-enabled nodes must include a specific app_data payload in their RN
 
 **Format**: **RS**|**VERSION**|**FLAGS**|**OTHER_DATA**
 
-| Component  | Type         |	Description                                          |
+| Component  | Type         |	Description                                        |
 | :--------- | :----------- | :--------------------------------------------------- |
 | RS         | String       | Static header identifying the Retiscope protocol.    |
-| VERSION    | SemVer       |	The protocol version (e.g., 0.1.0).                  |
-| FLAGS      | Bitmask (u8) |	Node capabilities and status.                        |
+| VERSION    | SemVer       | The protocol version (e.g., 0.1.0).                  |
+| FLAGS      | Bitmask (u8) | Node capabilities and status.                        |
 | OTHER_DATA | Optional     | Context-specific data (e.g., Battery, Load, or Name).|
 
 
 **Flags**:
 | Bit        | Name             |	Description                                                              |
-| :--------- | :--------------- | :----------------------------------------------------------------------- |
+| :--------- | :--------------- | :------------------------------------------------------------------------- |
 | 1          |	IS_ANCHOR       |	Is the node an anchor. If this is true then IS_SERVER must also be true. |
 | 2          |	IS_SERVER       |	Node serves data.                                                        |
 | 3          |	TRUSTED_ONLY    |	Connection requires Identity authentication.                             |
 | 4          |	MFA_REQUIRED    |	MFA signing may be required to access all feature.                       |
 | 5          |	REQUIRES_AUTH   |	Connection requires Password authentication.                             |
-| 6          |	MANAGEABLE	    | Node accepts remote configuration commands.                              |
-| 7          |	LOW_B_W	        | Node is on a low-bandwidth link (LoRa/HF).                               |
+| 6          |	MANAGEABLE	    |   Node accepts remote configuration commands.                              |
+| 7          |	LOW_B_W	        |   Node is on a low-bandwidth link (LoRa/HF).                               |
 
 ## Retiscope Specific Destinations
 
@@ -85,3 +85,14 @@ pub enum RetiscopeStatus {
     LinkCongested        = 0x82,       // "Medium is saturated, try later"
 }
 ```
+## Packet Format
+
+**Packet**:
+| Offset     | Field            | Type             | Description                              |
+| :--------- | :--------------- | :--------------- | :--------------------------------------- |
+| 0          |	Version         | u8               | Protocol version (starting at 0x01)      |
+| 1          |	Status          | u8               | RetiscopeStatus Enum value               |
+| 2-5        |	RequestID       | u32              | Unique ID to match Responses to Requests |
+| 6          |	Flags           | u8               | Flags to be dertermined                  |
+| 7-8        |	PayloadLen      | u8               | Length of the data following the header  |
+
