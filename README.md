@@ -7,7 +7,6 @@ Retiscope supports (or will support) multi node data retreival for viewing large
 ## Documentation
 - [Protocol Specification](notes/PROTOCOL_SPECIFICATION.md) — How nodes talk to each other.
 - [Architecture Overview](notes/ARCHITECTURE.md) — CLI vs. GUI vs. DB logic.
-- [Contributing](CONTRIBUTING.md) — How to help build Retiscope.
 
 ## Features / Planned Features
 
