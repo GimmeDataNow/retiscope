@@ -34,7 +34,7 @@ impl RetiscopeDB for SurrealImpl {
                 password: "a".into(),
             })
             .await
-            .inspect_err(|e| error!(error = %e , "Failed to singn in"))
+            .inspect_err(|e| error!(error = %e , "Failed to sign in"))
             .map_err(|_| RetiscopeError::FailedToSignIn)?;
 
         // set the correct
@@ -138,6 +138,7 @@ impl RetiscopeDB for SurrealImpl {
             };
         "#;
         // send query and log result
+        let count = data_to_send.len();
         self.connection
             .query(query)
             .bind(("data", data_to_send))
@@ -148,7 +149,7 @@ impl RetiscopeDB for SurrealImpl {
             .and_then(|response| {
                 response
                     .check()
-                    .inspect(|_| trace!("Batch sync complete"))
+                    .inspect(|_| debug!(count = count, "Batch sync complete"))
                     .inspect_err(|e| error!(error = %e, "Batch query execution failed"))
             })
             .map_err(|_| RetiscopeError::FailedQuery)?;
