@@ -19,13 +19,23 @@ All Retiscope-enabled nodes must include a specific app_data payload in their RN
 **Flags**:
 | Bit        | Name             |	Description                                                              |
 | :--------- | :--------------- | :------------------------------------------------------------------------- |
-| 1          |	IS_ANCHOR       |	Is the node an anchor. If this is true then IS_SERVER must also be true. |
-| 2          |	IS_SERVER       |	Node serves data.                                                        |
+| 1          |	IS_ANCHOR       |	Node is an anchor. Anchors are implicitly servers.                       |
+| 2          |	IS_SERVER       |	Node serves data but is not an anchor.                                   |
 | 3          |	TRUSTED_ONLY    |	Connection requires Identity authentication.                             |
 | 4          |	MFA_REQUIRED    |	MFA signing may be required to access all feature.                       |
 | 5          |	REQUIRES_AUTH   |	Connection requires Password authentication.                             |
 | 6          |	MANAGEABLE	    |   Node accepts remote configuration commands.                              |
 | 7          |	LOW_B_W	        |   Node is on a low-bandwidth link (LoRa/HF).                               |
+
+Flags are MSB-first. 
+
+### IS_ANCHOR and IS_SERVER
+A parser receiving `IS_ANCHOR=1` and `IS_SERVER=1` simultaneously must treat this as `IS_ANCHOR=1` only. `IS_ANCHOR=1` with `IS_SERVER=0` is valid and the node must be treated as a server
+### Auth Flag Ordering
+The authentication flags represent a sequential gatekeeping process. `TRUSTED_ONLY` is evaluated first — if set, the connecting identity must be in the node's trusted set before proceeding. `REQUIRES_AUTH` is evaluated second — if set, a password credential must be provided. `MFA_REQUIRED` is evaluated last. A flag that is not set is skipped. The announce payload containing these flags is a hint to the connecting client about what will be required; the manage endpoint enforces the actual policy.
+
+### OTHER_DATA
+`OTHER_DATA` is opaque to retiscope core. The core parser should silently discard this part. In the future plugins may attempt to parse this field for additional data.
 
 ## Retiscope Specific Destinations
 
@@ -94,5 +104,13 @@ pub enum RetiscopeStatus {
 | 1          |	Status          | u8               | RetiscopeStatus Enum value               |
 | 2-5        |	RequestID       | u32              | Unique ID to match Responses to Requests |
 | 6          |	Flags           | u8               | Flags to be dertermined                  |
-| 7-8        |	PayloadLen      | u8               | Length of the data following the header  |
+| 7-8        |	PayloadLen      | u16              | Length of the data following the header  |
+
+### RequestID Scoping
+
+A RequestID is valid for the lifetime of the request. Once a final response is received (any status that is not Processing, Queued, or DependencyWait), both sides must release the ID. The ID may then be reused.
+
+### Packet size
+
+Fragmentation and reassembly are out of scope for v0.1.0 (handled in large part by reticulum), and that nodes may reject oversized payloads with `PayloadTooLarge`.
 
