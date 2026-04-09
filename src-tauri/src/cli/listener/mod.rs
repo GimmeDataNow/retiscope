@@ -186,6 +186,7 @@ pub async fn run() {
 
     let (tx, mut rx) = mpsc::channel::<AnnounceData>(100);
 
+    let db_clone = db.clone();
     // batcher task
     tokio::spawn(async move {
         let mut batch = Vec::new();
@@ -206,6 +207,17 @@ pub async fn run() {
                     }
                 }
             }
+        }
+    });
+
+    // This task is to demonstrate the live updates from the database
+    tokio::spawn(async move {
+        let mut a = db_clone
+            .watch_announces()
+            .await
+            .expect("watch_announces() failed");
+        while let Ok(data) = a.recv().await {
+            info!(watch_return = ?data, "watch_announces");
         }
     });
 

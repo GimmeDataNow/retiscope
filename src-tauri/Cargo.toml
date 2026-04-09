@@ -64,3 +64,4 @@ surrealdb = { version = "3.0.1" }
 surrealdb-types = "3.0.1"
 futures = "0.3.32"
 async-trait = "0.1.89"
+chrono = "0.4.44"

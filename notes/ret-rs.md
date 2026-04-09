@@ -43,3 +43,15 @@ pub async fn get_announces(
 
 hops = 0 means it is on the same local hub (hearing your own announce)
 hubs do not count as hops themselves if there a local node is trying to connect to somewhere else.
+
+here is the issue: I have my database trait RetiscopeDB. Now i need to implement a way for me to get live updates from the tables “announces” and “nodes”. What I really need is for the surrealdb implementation of the trait to return a sort of database event that is completely agnostic to the database implementation, meaning that if i were to implement postgres or similar then it would have to return the same struct.
+
+This is a record from the announce table from my surrealdb.
+{
+	destination: node:bc7cabf778c26165958f419f01aab272,
+	hops: 8,
+	id: announce:00jcxv9v6i6xyfkg6lxu,
+	iface: '7c9fa136d4413fa6173637e883b6998d',
+	timestamp: d'2026-04-09T09:39:40.388173799Z',
+	transport_node: node:7cbbe5ada62d88ee2d4dbe0c3cb1bceb
+}

@@ -1,3 +1,4 @@
+use futures::channel::mpsc::UnboundedReceiver;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 
 use std::sync::Arc;
 
-use crate::data::AnnounceData;
+use crate::data::{AnnounceData, StoredAnnounce};
 use crate::errors::RetiscopeError;
 
 pub mod surrealdb;
@@ -47,6 +48,9 @@ pub trait RetiscopeDB: Send + Sync {
     ///
     /// TODO
     async fn save_announces(&self, announce: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError>;
+
+    async fn watch_announces(&self) -> Result<UnboundedReceiver<StoredAnnounce>, RetiscopeError>;
+    async fn node_announces(&self) -> Result<(), RetiscopeError>;
 }
 
 #[derive(Debug, Deserialize)]
