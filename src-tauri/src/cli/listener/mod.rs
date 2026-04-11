@@ -32,8 +32,9 @@
 //!
 //! Failures in interface spawning or configuration parsing are logged as
 //! warnings or errors but generally do not halt the entire ingestion process.
+use tracing::Instrument;
 #[allow(unused_imports)]
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -188,37 +189,48 @@ pub async fn run() {
 
     let db_clone = db.clone();
     // batcher task
-    tokio::spawn(async move {
-        let mut batch = Vec::new();
-        let mut timer = interval(Duration::from_secs(5));
+    let batcher_span = info_span!("batcher_task");
+    tokio::spawn(
+        async move {
+            let mut batch = Vec::new();
+            let mut timer = interval(Duration::from_secs(5));
 
-        loop {
-            tokio::select! {
-                Some(data) = rx.recv() => {
-                    batch.push(data);
-                    // flush early if batch is huge
-                    if batch.len() >= 1000 {
-                        let _ = db.save_announces(&mut batch).await;
+            loop {
+                tokio::select! {
+                    Some(data) = rx.recv() => {
+                        batch.push(data);
+                        // flush early if batch is huge
+                        if batch.len() >= 1000 {
+                            let _ = db.save_announces(&mut batch).await;
+                        }
                     }
-                }
-                _ = timer.tick() => {
-                    if !batch.is_empty() {
-                        let _ = db.save_announces(&mut batch).await;
+                    _ = timer.tick() => {
+                        if !batch.is_empty() {
+                            let _ = db.save_announces(&mut batch).await;
+                        }
                     }
                 }
             }
         }
-    });
+        // .instrument(tracing::Span::current()),
+        .instrument(batcher_span),
+    );
 
     // This task is to demonstrate the live updates from the database
     tokio::spawn(async move {
-        let mut a = db_clone
-            .watch_announces()
-            .await
-            .expect("watch_announces() failed");
-        while let Ok(data) = a.recv().await {
-            info!(watch_return = ?data, "watch_announces");
+        // let mut a = db_clone
+        //     .watch_announces()
+        //     .await
+        //     .expect("watch_announces() failed");
+        // while let Ok(_data) = a.recv().await {
+        //     // info!(watch_return = ?data, "watch_announces");
+        // }
+        let mut b = db_clone.watch_nodes().await.expect("watch_nodes() failed");
+        while let Ok(_data) = b.recv().await {
+            // info!(watch_return = ?data, "watch_nodes");
         }
+
+        warn!("tasks have finished")
     });
 
     // send announces to the batcher task

@@ -40,18 +40,6 @@ pub async fn get_announces(
     Ok(announces)
 }
 ```
-
-hops = 0 means it is on the same local hub (hearing your own announce)
-hubs do not count as hops themselves if there a local node is trying to connect to somewhere else.
-
-here is the issue: I have my database trait RetiscopeDB. Now i need to implement a way for me to get live updates from the tables “announces” and “nodes”. What I really need is for the surrealdb implementation of the trait to return a sort of database event that is completely agnostic to the database implementation, meaning that if i were to implement postgres or similar then it would have to return the same struct.
-
-This is a record from the announce table from my surrealdb.
-{
-	destination: node:bc7cabf778c26165958f419f01aab272,
-	hops: 8,
-	id: announce:00jcxv9v6i6xyfkg6lxu,
-	iface: '7c9fa136d4413fa6173637e883b6998d',
-	timestamp: d'2026-04-09T09:39:40.388173799Z',
-	transport_node: node:7cbbe5ada62d88ee2d4dbe0c3cb1bceb
-}
+2026-04-09T23:29:04.283688Z ERROR no good error=Error("failed to parse", line: 0, column: 0) data=Object {"destination": String("node:234eed3d3775eb1e29cf5a3842961c25"), "hops": Number(0), "id": String("announce:f0mkch2i0e0a9odxagll"), "iface": String("7c9fa136d4413fa6173637e883b6998d"), "timestamp": String("2026-04-09T23:29:04.209327549Z"), "transport_node": String("node:NULL")}
+Why does this error? Simple, the current impl kinda sucks.
+transport_node can be node:NULL which is not a valid hex string. This probably comes from my bad impl of the serialize impl.

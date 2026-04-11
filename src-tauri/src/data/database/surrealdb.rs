@@ -11,12 +11,11 @@
 //! # Performance
 //! The [`SurrealImpl::save_announces`] method uses a batched UPSERT logic to minimize
 //! round-trips to the database, ensuring efficient ingestion of high-frequency data.
-use futures::channel::mpsc;
-use futures::{StreamExt, TryStreamExt};
+use futures::{channel::mpsc, StreamExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::data::{database::RetiscopeDB, AnnounceData, StoredAnnounce};
+use crate::data::{database::RetiscopeDB, AnnounceData, StoredAnnounce, StoredNode};
 use crate::errors::RetiscopeError;
 
 use async_trait::async_trait;
@@ -24,88 +23,20 @@ use async_trait::async_trait;
 use surrealdb::engine::any::{connect, Any};
 use surrealdb::opt::auth::Root;
 
-use serde_json::from_value;
-use serde_json::Value;
-
 #[derive(Debug)]
 #[cfg(feature = "surrealdb")]
 pub struct SurrealImpl {
     pub connection: surrealdb::Surreal<Any>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct AnnounceRow {
-    id: String,
-    // mirror all other fields from StoredAnnounce
-    #[serde(flatten)]
-    inner: serde_json::Value,
-}
-
-fn surreal_value_to_json(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            // Tagged surrealdb::Value variants
-            if let Some(inner) = map.get("String") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Int") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Float") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Bool") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Datetime") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Number") {
-                return surreal_value_to_json(inner);
-            }
-            if let Some(inner) = map.get("Null") {
-                return serde_json::Value::Null;
-            }
-            // RecordId -> flatten to "table:key" string
-            // if let Some(record) = map.get("RecordId") {
-            //     if let serde_json::Value::Object(r) = record {
-            //         let table = r.get("table").and_then(|t| t.as_str()).unwrap_or("");
-            //         let key = r.get("key").map(surreal_value_to_json);
-            //         let key_str = key.as_ref().and_then(|k| k.as_str()).unwrap_or("");
-            //         return serde_json::Value::String(format!("{}:{}", table, key_str));
-            //     }
-            // }
-            if let Some(record) = map.get("RecordId") {
-                if let serde_json::Value::Object(r) = record {
-                    let key = r.get("key").map(surreal_value_to_json);
-                    // Just return the key, not "table:key"
-                    return key.unwrap_or(serde_json::Value::Null);
-                }
-            }
-            // Unwrap the "Object" wrapper
-            if let Some(inner_obj) = map.get("Object") {
-                return surreal_value_to_json(inner_obj);
-            }
-            // Plain object — recurse into values
-            serde_json::Value::Object(
-                map.iter()
-                    .map(|(k, v)| (k.clone(), surreal_value_to_json(v)))
-                    .collect(),
-            )
-        }
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(surreal_value_to_json).collect())
-        }
-        other => other.clone(),
-    }
-}
-
 #[cfg(feature = "surrealdb")]
 #[async_trait]
 impl RetiscopeDB for SurrealImpl {
+    #[instrument(skip(self))]
     async fn set_up_db(&self) -> Result<(), RetiscopeError> {
         todo!()
     }
+    #[instrument(skip(self))]
     async fn init_db(&self) -> Result<(), RetiscopeError> {
         // sign in
         self.connection
@@ -173,48 +104,32 @@ impl RetiscopeDB for SurrealImpl {
         let count = data.len();
         let entries = std::mem::take(data);
 
-        // this was created in large part by gemini
-        // seems alright tho
         let query = r#"
             FOR $entry IN $data {
-                -- 1. Heartbeat for the Destination Node
+                -- Update 'last_seen' for the destination
                 UPSERT type::record("node", $entry.destination) 
                 SET last_seen = time::now();
     
-                -- 2. Heartbeat for the Relay Node (if it exists)
+                -- Update 'last_seen' for the transport_node
                 IF $entry.transport_node != NONE {
                     UPSERT type::record("node", $entry.transport_node) 
                     SET last_seen = time::now();
                 };
     
-                -- 3. Smart Announce Logic
-                LET $dest_id = type::record("node", $entry.destination);
-                LET $relay_id = IF $entry.transport_node != NONE { 
-                    type::record("node", $entry.transport_node) 
-                } ELSE { 
-                    NONE 
-                };
-    
-                LET $last = (
-                    SELECT id, hops, transport_node, timestamp
-                    FROM announce 
-                    WHERE destination = $dest_id 
-                    ORDER BY timestamp DESC 
-                    LIMIT 1
-                )[0];
-    
-                IF !$last OR $last.hops != $entry.hops OR $last.transport_node != $relay_id {
-                    CREATE announce SET
-                        destination = $dest_id,
-                        transport_node = $relay_id,
-                        hops = $entry.hops,
-                        iface = $entry.iface,
-                        timestamp = time::now();
-                } ELSE {
-                    UPDATE $last.id SET timestamp = time::now();
-                };
-            };
+                -- Dump announce into db
+                CREATE announce SET
+                    destination = type::record("node", $entry.destination),
+                    transport_node = IF $entry.transport_node != NONE { 
+                        type::record("node", $entry.transport_node) 
+                    } ELSE { 
+                        NONE 
+                    },
+                    hops = $entry.hops,
+                    iface = $entry.iface,
+                    timestamp = time::now();
+             };
         "#;
+
         // send query and log result
         let json_value: serde_json::Value =
             serde_json::to_value(&entries).map_err(|_| RetiscopeError::FailedQuery)?;
@@ -236,6 +151,7 @@ impl RetiscopeDB for SurrealImpl {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn watch_announces(
         &self,
     ) -> Result<mpsc::UnboundedReceiver<StoredAnnounce>, RetiscopeError> {
@@ -250,41 +166,34 @@ impl RetiscopeDB for SurrealImpl {
             .query("LIVE SELECT *, type::string(id) AS id FROM announce")
             .await
             .map_err(|e| {
-                error!(error = ?e, "watch announces failed");
+                error!(error = ?e, "Failed to establish live query");
                 RetiscopeError::FailedQuery
             })?
-            // surrealdb always returns a vec, even if it is only one element
+            // surrealdb always returns a vec, even if it is only one element hence the '0'
             .stream::<surrealdb::Notification<surrealdb_types::Value>>(0)
             .map_err(|e| {
-                error!(error = ?e, "watch announces failed");
+                error!(error = ?e, "Failed to convert live query into a stream");
                 RetiscopeError::FailedQuery
             })?;
 
         // creates a channel and a background task to subscribe to updates
         let (tx, rx) = mpsc::unbounded::<StoredAnnounce>();
         tokio::spawn(async move {
+            // errors and more erros
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(notification) => {
-                        let mut norm = notification.data.into_json_value();
-                        info!(?norm);
-                        if let Some(obj) = norm.as_object_mut() {
-                            for key in &["destination", "transport_node"] {
-                                if let Some(serde_json::Value::String(s)) = obj.get(*key) {
-                                    let stripped = s.splitn(2, ':').nth(1).unwrap_or(s).to_string();
-                                    obj.insert(
-                                        key.to_string(),
-                                        serde_json::Value::String(stripped),
-                                    );
+                        // convert the data
+                        let norm = notification.data.into_json_value();
+                        match serde_json::from_value::<StoredAnnounce>(norm) {
+                            Ok(announce) => {
+                                if let Err(_) = tx.unbounded_send(announce) {
+                                    error!("Failed to send on channel");
+                                    break;
                                 }
                             }
-                        }
-
-                        match serde_json::from_value::<StoredAnnounce>(norm) {
-                            Ok(announce) => info!("all good"),
                             Err(e) => {
-                                error!(error = ?e, "no good");
-                                break;
+                                error!(error = ?e, "Failed to parse json into StoredAnnounce");
                             }
                         }
                     }
@@ -297,8 +206,58 @@ impl RetiscopeDB for SurrealImpl {
 
         Ok(rx)
     }
-    async fn node_announces(&self) -> Result<(), RetiscopeError> {
-        todo!()
+    #[instrument(skip(self))]
+    async fn watch_nodes(&self) -> Result<mpsc::UnboundedReceiver<StoredNode>, RetiscopeError> {
+        // I am very unhappy with this LIVE SELECT query but
+        // surrealdb KEEPS COMPLAINING whenever I try to use
+        // the .live(), because of StoredAnnounce not
+        // implementing SurrealValue. But I can't impl it for
+        // AddressHash since it is a foreign type. I really don't
+        // want to make even more wrappers.
+        let mut stream = self
+            .connection
+            .query("LIVE SELECT *, type::string(id) AS id FROM node")
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Failed to establish live query");
+                RetiscopeError::FailedQuery
+            })?
+            // surrealdb always returns a vec, even if it is only one element hence the '0'
+            .stream::<surrealdb::Notification<surrealdb_types::Value>>(0)
+            .map_err(|e| {
+                error!(error = ?e, "Failed to convert live query into a stream");
+                RetiscopeError::FailedQuery
+            })?;
+
+        // creates a channel and a background task to subscribe to updates
+        let (tx, rx) = mpsc::unbounded::<StoredNode>();
+        tokio::spawn(async move {
+            // errors and more erros
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(notification) => {
+                        // convert the data
+                        let norm = notification.data.into_json_value();
+                        match serde_json::from_value::<StoredNode>(norm) {
+                            Ok(announce) => {
+                                if let Err(_) = tx.unbounded_send(announce) {
+                                    error!("Failed to send on channel");
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                error!(error = ?e, "Failed to parse json into StoredAnnounce");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = ?e, "Stream error");
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
     }
 }
 
@@ -313,7 +272,7 @@ impl SurrealImpl {
         let protocol = if use_tls { "wss" } else { "ws" };
         let endpoint = format!("{}://{}:{}", protocol, address, port);
 
-        // The 'connect' function from the 'any' engine is magic
+        // the 'connect' function from the 'any' engine is magic
         let db = connect(endpoint)
             .await
             .map_err(|_| RetiscopeError::FailedToConnectToDB)?;

@@ -4996,6 +4996,7 @@ dependencies = [
 [[package]]
 name = "reticulum"
 version = "0.1.0"
+source = "git+https://github.com/GimmeDataNow/Reticulum-rs?branch=announce_redo#4fac757595da402d29e176a4b25f64be3c142182"
 dependencies = [
  "aes",
  "cbc",

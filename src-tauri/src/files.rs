@@ -4,21 +4,37 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+#[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// Global access to the app's directories
-#[allow(dead_code)]
+/// Global access to the application's standard directory structure.
+///
+/// This struct follows the XDG Base Directory Specification on Linux,
+/// Known Folders on Windows, and Standard Directories on macOS.
 pub struct AppPaths {
+    /// Directory for configuration files (e.g., `config.toml`).
     pub config: PathBuf,
+    /// Directory for persistent data files (e.g., `identity.key`, databases).
     pub data: PathBuf,
+    /// Directory for non-essential data (e.g., logs, temporary downloads).
     pub cache: PathBuf,
 }
 
+/// A global, thread-safe singleton for application paths.
+/// Initialized lazily on the first call to [`get_paths`].
 pub static PATHS: OnceLock<AppPaths> = OnceLock::new();
 
+/// Retrieves the global application paths, initializing them if necessary.
+///
+/// This function ensures that the `config`, `data`, and `cache` directories
+/// exist on the filesystem before returning.
+///
+/// # Panics
+/// Panics if the home directory cannot be determined or if the process lacks
+/// permissions to create the required directories.
 pub fn get_paths() -> &'static AppPaths {
     PATHS.get_or_init(|| {
         let proj_dirs = ProjectDirs::from("org", "reticulum", "retiscope")
@@ -39,6 +55,7 @@ pub fn get_paths() -> &'static AppPaths {
     })
 }
 
+/// Helper to recursively create a directory if it does not already exist.
 fn ensure_dir(path: &Path) {
     if !path.exists() {
         std::fs::create_dir_all(path)
@@ -46,6 +63,9 @@ fn ensure_dir(path: &Path) {
     }
 }
 
+/// Atomically creates a new file at the specified path if it does not exist.
+///
+/// This is a "best-effort" creation and ignores errors (e.g., if the file already exists).
 pub fn ensure_file<P>(path: P)
 where
     P: AsRef<Path>,
@@ -53,6 +73,14 @@ where
     let _ = std::fs::File::create_new(path);
 }
 
+/// Persists the Reticulum identity key to the data directory.
+///
+/// On Unix-like systems, this function explicitly sets the file permissions
+/// to `0o600` (read/write for the owner only) to protect the private key.
+///
+/// # Errors
+/// Returns an [`std::io::Result`] if the file cannot be created, truncated, or if
+/// permission settings fail.
 pub fn save_identity(identity_data: &[u8]) -> std::io::Result<()> {
     let path = get_paths().data.join("identity.key");
 
@@ -62,7 +90,7 @@ pub fn save_identity(identity_data: &[u8]) -> std::io::Result<()> {
         .truncate(true) // override the prev file
         .open(&path)?;
 
-    // set permissions to 600
+    // set permissions to 600 (Unix only)
     #[cfg(unix)]
     {
         let mut perms = file.metadata()?.permissions();
@@ -75,35 +103,37 @@ pub fn save_identity(identity_data: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Represents the reticulum connection that the front end needs to make
+/// Configuration details for a remote Reticulum node connection.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RemoteConnection {
-    /// alias or name
+    /// A human-readable identifier for the connection.
     pub alias: String,
-    /// address hash as hex string
+    /// The destination address hash, represented as a hex string.
     pub address: String,
+    /// Whether this connection is active for the current session.
     pub enabled: bool,
 }
 
-/// Wrapper type for use with TOML
+/// A wrapper for serializing a collection of [`RemoteConnection`]s,
+/// primarily used for TOML configuration files.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RemoteConnectionWrapper {
     pub connections: Vec<RemoteConnection>,
 }
 
-#[tauri::command]
-fn load_connections() -> Result<Vec<RemoteConnection>, String> {
-    let path = get_paths().config.join("remote.toml");
+// #[tauri::command]
+// fn load_connections() -> Result<Vec<RemoteConnection>, String> {
+//     let path = get_paths().config.join("remote.toml");
 
-    if !path.exists() {
-        return Ok(vec![]);
-    }
+//     if !path.exists() {
+//         return Ok(vec![]);
+//     }
 
-    let contents = std::fs::read_to_string(path)
-        .inspect_err(|e| error!(error = %e))
-        .map_err(|e| e.to_string())?;
-    let config: RemoteConnectionWrapper = toml::from_str(&contents)
-        .inspect_err(|e| error!(error = %e))
-        .map_err(|e| e.to_string())?;
-    Ok(config.connections)
-}
+//     let contents = std::fs::read_to_string(path)
+//         .inspect_err(|e| error!(error = %e))
+//         .map_err(|e| e.to_string())?;
+//     let config: RemoteConnectionWrapper = toml::from_str(&contents)
+//         .inspect_err(|e| error!(error = %e))
+//         .map_err(|e| e.to_string())?;
+//     Ok(config.connections)
+// }
