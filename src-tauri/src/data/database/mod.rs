@@ -1,26 +1,81 @@
-//! The Database Persistence and Configuration Layer.
+//! # Database Persistence & Configuration Layer
 //!
-//! This module provides the infrastructure for managing database connections and
-//! configurations within Retiscope. It abstracts the underlying database
-//! through a unified trait, allowing the application to remain agnostic of whether
-//! it is communicating with SurrealDB, PostgreSQL or IndexedDB.
+//! This module provides a **provider‑agnostic** abstraction for all database
+//! interactions in Retiscope.  It allows the application to stay completely
+//! independent of the chosen backend – whether that is **SurrealDB** (the
+//! current default), **PostgreSQL**, or an **IndexedDB** instance.
 //!
-//! # Architecture
+//! The design is split into three logical parts:
 //!
-//! The module is built upon a **Provider-Agnostic Pattern**:
+//! 1. **Configuration** – `DatabaseConfig` & `DatabaseOptions` describe a
+//!    connection in a strongly‑typed way and can be deserialized from a
+//!    TOML file.
+//! 2. **Abstraction Layer** – the `RetiscopeDB` trait defines the public
+//!    interface that all drivers must implement.  It covers schema setup,
+//!    runtime initialisation, data persistence, and real‑time change streams.
+//! 3. **Concrete Implementations** – each driver lives in its own sub‑module
+//!    (currently only `surrealdb` is implemented).  New drivers can be added
+//!    by implementing the trait and extending the `DatabaseOptions` enum.
 //!
-//! 1. **Configuration Layer**: Uses a strongly-typed, tagged enum (`DatabaseOptions`)
-//!    to define connection parameters for various backends, supporting seamless
-//!    deserialization from TOML configuration files.
+//! ## Configuration
+//! The configuration is deserialized from TOML using Serde’s adjacency
+//! tagging.  Example snippets for each supported provider follow.
 //!
-//! 2. **Abstraction Layer**: The [`RetiscopeDB`] trait defines the interface for
-//!    all database implementations, ensuring that features like batch-saving
-//!    announces and real-time "watching" are consistent across all drivers.
+//! ### SurrealDB (default for development)
+//! ```toml
+//! [database]
+//! type = "surreal"
+//! address = "127.0.0.1"
+//! port = 8000
+//! use_tls = false
+//! namespace = "retiscope"
+//! database = "network"
+//! ```
 //!
-//! # Implementation Notes
+//! ### PostgreSQL
+//! ```toml
+//! [database]
+//! type = "postgres"
+//! connection_string = "postgresql://user:pass@localhost/retiscope"
+//! ```
 //!
-//! * **SurrealDB**: Currently the primary implementation, utilizing namespace
-//!   and database separation for multi-tenant-style isolation.
+//! ### IndexedDB
+//! ```toml
+//! [database]
+//! type = "indexeddb"
+//! db_name = "retiscope"
+//! ```
+//!
+//! The `DatabaseConfig::default()` implementation points to a local
+//! SurrealDB instance and is meant only for quick local testing – do **not**
+//! use it in production builds.
+//!
+//! ## Trait – `RetiscopeDB`
+//! All drivers must implement this trait, which guarantees a uniform API across
+//! providers.  The key responsibilities are:
+//!
+//! * **Schema bootstrap** – `set_up_db` creates tables and indexes,
+//!   idempotently.
+//! * **Runtime initialisation** – `init_db` authenticates and selects the
+//!   correct namespace/database.
+//! * **Persisting data** – `save_announces` performs an “upsert” for every
+//!   `AnnounceData` and updates the related nodes’ timestamps.
+//! * **Real‑time streams** – `watch_announces` / `watch_nodes` return
+//!   `futures::channel::mpsc::UnboundedReceiver` streams that emit
+//!   `StoredAnnounce`/`StoredNode` as they are committed to the database.
+//!
+//! ## Error handling
+//! All trait methods return `Result<_, RetiscopeError>`.  For database‑level
+//! errors (`sqlx::Error`, `surrealdb::Error`, etc.) those are wrapped
+//! appropriately.  The configuration loader falls back to the default
+//! configuration on parse errors and logs a warning.
+//!
+//! ## Extending the database layer
+//! 1. Add a new variant to `DatabaseOptions` and implement any required
+//!    fields.<br>
+//! 2. Create a new sub‑module (e.g. `postgres.rs`) that implements
+//!    `RetiscopeDB` for that provider.<br>
+//! 3. Update `DatabaseConfig::create_db` to construct the new driver.
 #[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -33,48 +88,71 @@ use std::sync::Arc;
 
 use crate::data::{AnnounceData, StoredAnnounce, StoredNode};
 use crate::errors::RetiscopeError;
+
+/// Sub‑module containing the SurrealDB implementation of
+/// `RetiscopeDB`.  The implementation lives in
+/// `surrealdb/mod.rs`.  New providers should be added in
+/// analogous sub‑modules (e.g. `postgres.rs`, `indexeddb.rs`).
 pub mod surrealdb;
 
-/// An asynchronous trait representing the database persistence layer for Retiscope.
+/// # Retiscope Database Layer
 ///
-/// This trait provides an abstraction for managing database schemas, initializing
-/// connections, persisting announcement data, and subscribing to real-time
-/// updates for announces and nodes.
+/// The public API of this module is centered around the
+/// [`RetiscopeDB`] trait.  Concrete drivers (currently only
+/// SurrealDB) implement this trait so that the rest of the
+/// application can stay completely agnostic to the underlying
+/// database technology.
+///
+/// All trait methods are `async` and the trait itself is
+/// `Send + Sync`, so a single instance can safely be shared
+/// across threads (hence the `Arc<dyn RetiscopeDB>` returned by
+/// `DatabaseConfig::create_db`).
 #[async_trait]
 pub trait RetiscopeDB: Send + Sync {
-    /// Initializes the database schema and administrative users.
+    /// Bootstrap the database schema and administrative users.
     ///
-    /// This method ensures the database is in a ready state by:
-    /// * Applying required table schemas and indexes.
-    /// * Provisioning internal system users and permissions.
+    /// The default implementation should be *idempotent* – it can be
+    /// called repeatedly without causing errors.  It typically:
+    ///   1. Creates the tables used by Retiscope.
+    ///   2. Adds indexes that speed up queries.
+    ///   3. Creates any internal system users that the driver
+    ///      requires.
     ///
-    /// This is typically called during a system bootstrap.
+    /// This step is normally executed once when the application
+    /// starts up.
     async fn set_up_db(&self) -> Result<(), RetiscopeError>;
 
-    /// Prepares the database connection for operational use.
+    /// Authenticate and prepare the database for normal operation.
     ///
-    /// This method ensures the correct database state for subsequent queries by:
-    /// * Authenticating/logging into the correct database user.
-    /// * Selecting the appropriate namespace and database schema.
+    /// The method must log in to the database, select the correct
+    /// namespace/database (or schema), and perform any other
+    /// runtime‑initialisation that the driver needs.
     async fn init_db(&self) -> Result<(), RetiscopeError>;
 
-    /// Persists a collection of announcement data to the database.
+    /// Persist a collection of `AnnounceData` objects.
     ///
-    /// This method performs an "upsert" (update or insert) operation for:
-    /// * Each individual [`AnnounceData`] entry.
-    /// * The associated nodes and their respective timestamps.
+    /// Each `AnnounceData` is **upserted**: if an identical
+    /// announcement already exists it is updated; otherwise it is
+    /// inserted.  The method also updates the timestamps of the
+    /// nodes referenced by the announces.
     async fn save_announces(&self, announce: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError>;
 
-    /// Returns a real-time stream of stored announcements.
+    /// Subscribe to real‑time updates of stored announcements.
     ///
-    /// This method provides an asynchronous, unbounded receiver that yields [`StoredAnnounce`]
-    /// objects as they are successfully committed to the database.
+    /// The returned `UnboundedReceiver<StoredAnnounce>` behaves
+    /// like a stream that you can `recv().await` from.  Because
+    /// it is *unbounded* there is no built‑in back‑pressure,
+    /// so consumers should keep up with the stream or risk
+    /// memory bloat.
     async fn watch_announces(&self) -> Result<UnboundedReceiver<StoredAnnounce>, RetiscopeError>;
 
-    /// Returns a real-time stream of stored node updates.
+    /// Subscribe to real‑time updates of stored node information.
     ///
-    /// This method provides an asynchronous, unbounded receiver that yields [`StoredNode`]
-    /// objects whenever node information is updated in the database.
+    /// The returned `UnboundedReceiver<StoredAnnounce>` behaves
+    /// like a stream that you can `recv().await` from.  Because
+    /// it is *unbounded* there is no built‑in back‑pressure,
+    /// so consumers should keep up with the stream or risk
+    /// memory bloat.
     async fn watch_nodes(&self) -> Result<UnboundedReceiver<StoredNode>, RetiscopeError>;
 }
 
@@ -85,10 +163,9 @@ pub trait RetiscopeDB: Send + Sync {
 /// from configuration files (e.g., TOML).
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
-    /// The specific connection options for the chosen database provider.
+    /// Connection options for the selected database provider.
     pub database: DatabaseOptions,
-    // Other settings...
-    // pub log_level: String,
+    // Other general configuration options can be added here
 }
 
 /// Configuration options for different database backends.
@@ -113,8 +190,10 @@ pub enum DatabaseOptions {
         database: String,
     },
     /// Configuration for a PostgreSQL instance
+    /// (implementation is currently a `todo!` placeholder).
     Postgres { connection_string: String },
     /// Configuration for an IndexedDB instance
+    /// (implementation is currently a `todo!` placeholder).
     IndexedDb { db_name: String },
 }
 
@@ -178,11 +257,12 @@ impl DatabaseConfig {
     }
 }
 
-/// Loads the database configuration from a file on disk.
+/// Load the database configuration from a file on disk.
 ///
-/// This function attempts to read a file at the provided path and parse it as TOML.
-/// If the file cannot be read or the content is invalid, it will log a warning
-/// and fall back to the [`DatabaseConfig::default()`] implementation.
+/// The function reads the file at `path`, parses it as TOML, and
+/// returns the resulting `DatabaseConfig`.  If the file cannot be
+/// read or the TOML is invalid, the function logs a warning
+/// and falls back to `DatabaseConfig::default()`.
 #[instrument]
 pub fn load_database_config(path: PathBuf) -> DatabaseConfig {
     fs::read_to_string(&path)

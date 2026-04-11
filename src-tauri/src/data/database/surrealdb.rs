@@ -23,9 +23,16 @@ use async_trait::async_trait;
 use surrealdb::engine::any::{connect, Any};
 use surrealdb::opt::auth::Root;
 
+/// SurrealDB connection wrapper.
+/// The struct is only available when the Cargo feature `surrealdb` is enabled.
+///
+/// It stores the underlying `surrealdb::Surreal<Any>` connection that is
+/// used to execute queries, perform authentication, and listen for live updates.
 #[derive(Debug)]
 #[cfg(feature = "surrealdb")]
 pub struct SurrealImpl {
+    /// The SurrealDB client.  The generic `Any` engine is used so that
+    /// the same code works for WebSocket, HTTP, or local file storage.
     pub connection: surrealdb::Surreal<Any>,
 }
 
@@ -262,6 +269,18 @@ impl RetiscopeDB for SurrealImpl {
 }
 
 impl SurrealImpl {
+    /// Build a new `SurrealImpl` from a raw host/port pair.
+    ///
+    /// * `address` – hostname or IP of the SurrealDB server.  
+    /// * `port` – TCP port the server listens on.  
+    /// * `use_tls` – `true` → `wss`, `false` → `ws`.  
+    /// * `namespace` & `database` – the namespace/database to `use`
+    ///   for every subsequent query.
+    ///
+    /// The function performs:
+    ///   1. Create a `surrealdb::Surreal<Any>` client (`connect` from the `any` engine).  
+    ///   2. Switch to the provided namespace and database.  
+    ///   3. Return the wrapped client or a `RetiscopeError` if anything fails.
     pub async fn new(
         address: &str,
         port: &u16,
