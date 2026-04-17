@@ -19,3 +19,23 @@ The primary Retiscope node is depicted in white. The items with a green color re
 
 ## The Anchor Node
 ![Architecture overview for an anchor node](./images/architecture_anchor_node.svg)
+
+Anchor nodes are special reticulum nodes that are part of the the retiscope specification. Anchor nodes exist to aggregate services and to reduce network noise.
+
+In oder for a anchor node to function other nodes must have special 'register-service' destinations. These destinations then link to the anchor node and request to be added to the service registry. The service registry is an endpoint/destination that periodically announces its presence. Users may connect to an anchor node to request a list of available services and their metadata. An anchor node does NOT ensure that the service is reachable by the client.
+The anchor node requires each service node to maintain a link to it. Should a link be dropped then said service must be marked as stale in the service registry. Should a service remain stale for a prolonged period of time it should then be removed from the service registry.
+
+### Process
+The service node requests to be added to an anchor node.
+
+The anchor nodes accepts.
+
+A link between the anchor node and the service is maintained.
+
+A retiscope node now connects to the anchor node and requests the available services.
+
+The anchor node responds.
+
+The retiscope node now attempts to connect to the destinations.
+
+The service responds and links to the retiscope node.
