@@ -35,6 +35,7 @@
           protobuf
 
           libclang
+          vite
 
           # surrealdb
           # surrealdb

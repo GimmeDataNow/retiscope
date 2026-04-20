@@ -39,7 +39,7 @@ async fn main() {
         arguments::Commands::Gui => {
             info!("Launching GUI...");
             // tauri::Builder::default().run(tauri::generate_context!()).expect("error while running tauri application");
-            retiscope_lib::run();
+            retiscope_lib::run().await;
         }
     }
 }

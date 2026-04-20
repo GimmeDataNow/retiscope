@@ -225,12 +225,25 @@ pub async fn run() {
         // while let Ok(_data) = a.recv().await {
         //     // info!(watch_return = ?data, "watch_announces");
         // }
-        let mut b = db_clone.watch_nodes().await.expect("watch_nodes() failed");
-        while let Ok(_data) = b.recv().await {
-            // info!(watch_return = ?data, "watch_nodes");
-        }
+        // let mut b = db_clone.watch_nodes().await.expect("watch_nodes() failed");
+        // while let Ok(data) = b.recv().await {
+        //     info!(watch_return = ?data, "watch_nodes");
+        // }
 
-        warn!("tasks have finished")
+        // let c = db_clone
+        //     .fetch_announces()
+        //     .await
+        //     .expect("fetch_announces() failed");
+
+        // info!(payload = ?c, "");
+
+        // let d = db_clone
+        //     .fetch_nodes()
+        //     .await
+        //     .expect("fetch_announces() failed");
+        // info!(payload = ?d, "");
+
+        // warn!("tasks have finished")
     });
 
     // send announces to the batcher task

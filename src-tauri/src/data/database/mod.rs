@@ -137,6 +137,10 @@ pub trait RetiscopeDB: Send + Sync {
     /// nodes referenced by the announces.
     async fn save_announces(&self, announce: &mut Vec<AnnounceData>) -> Result<(), RetiscopeError>;
 
+    async fn fetch_announces(&self) -> Result<Vec<StoredAnnounce>, RetiscopeError>;
+
+    async fn fetch_nodes(&self) -> Result<Vec<StoredNode>, RetiscopeError>;
+
     /// Subscribe to real‑time updates of stored announcements.
     ///
     /// The returned `UnboundedReceiver<StoredAnnounce>` behaves

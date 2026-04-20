@@ -78,7 +78,7 @@ pub struct AnnounceData {
 
 /// Persisted announcement stored in the database.
 /// Includes capture metadata (`id`, `timestamp`) and deserialisation helpers.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StoredAnnounce {
     /// Auto‑generated database identifier.
     pub id: String,
@@ -87,15 +87,25 @@ pub struct StoredAnnounce {
     pub hops: u8,
 
     /// Optional transport node that forwarded the packet.
-    #[serde(default, deserialize_with = "deserialize_opt_hash")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_hash",
+        serialize_with = "serialize_opt_hash"
+    )]
     pub transport_node: Option<AddressHash>,
 
     /// Destination of the announcement.
-    #[serde(deserialize_with = "deserialize_hash")]
+    #[serde(
+        deserialize_with = "deserialize_hash",
+        serialize_with = "serialize_hash"
+    )]
     pub destination: AddressHash,
 
     /// Interface that generated the announcement.
-    #[serde(deserialize_with = "deserialize_hash")]
+    #[serde(
+        deserialize_with = "deserialize_hash",
+        serialize_with = "serialize_hash"
+    )]
     pub iface: AddressHash,
 
     /// Timestamp of when the announcement was first captured.
@@ -104,7 +114,7 @@ pub struct StoredAnnounce {
 
 /// Minimal node record kept in the database.
 /// Stores the first and last time the node was observed.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StoredNode {
     /// Auto‑generated database identifier.
     pub id: String,

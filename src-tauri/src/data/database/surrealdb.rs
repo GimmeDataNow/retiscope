@@ -159,6 +159,72 @@ impl RetiscopeDB for SurrealImpl {
     }
 
     #[instrument(skip(self))]
+    async fn fetch_announces(&self) -> Result<Vec<StoredAnnounce>, RetiscopeError> {
+        let mut response = self
+            .connection
+            .query("SELECT *, type::string(id) AS id FROM announce")
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Failed to execute fetch query");
+                RetiscopeError::FailedQuery
+            })?;
+
+        let raw_values: Vec<surrealdb_types::Value> = response.take(0).map_err(|e| {
+            error!(error = ?e, "Failed to take values from response");
+            RetiscopeError::FailedQuery
+        })?;
+
+        let announces: Vec<StoredAnnounce> = raw_values
+            .into_iter()
+            .filter_map(|val| {
+                let json = val.into_json_value();
+                match serde_json::from_value::<StoredAnnounce>(json) {
+                    Ok(announce) => Some(announce),
+                    Err(e) => {
+                        error!(error = ?e, "Failed to parse JSON into StoredAnnounce");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        Ok(announces)
+    }
+
+    #[instrument(skip(self))]
+    async fn fetch_nodes(&self) -> Result<Vec<StoredNode>, RetiscopeError> {
+        let mut response = self
+            .connection
+            .query("SELECT *, type::string(id) AS id FROM node")
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Failed to execute fetch query");
+                RetiscopeError::FailedQuery
+            })?;
+
+        let raw_values: Vec<surrealdb_types::Value> = response.take(0).map_err(|e| {
+            error!(error = ?e, "Failed to take values from response");
+            RetiscopeError::FailedQuery
+        })?;
+
+        let announces: Vec<StoredNode> = raw_values
+            .into_iter()
+            .filter_map(|val| {
+                let json = val.into_json_value();
+                match serde_json::from_value::<StoredNode>(json) {
+                    Ok(announce) => Some(announce),
+                    Err(e) => {
+                        error!(error = ?e, "Failed to parse JSON into StoredAnnounce");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        Ok(announces)
+    }
+
+    #[instrument(skip(self))]
     async fn watch_announces(
         &self,
     ) -> Result<mpsc::UnboundedReceiver<StoredAnnounce>, RetiscopeError> {
