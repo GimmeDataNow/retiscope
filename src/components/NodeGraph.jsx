@@ -1,90 +1,171 @@
-import { onMount, onCleanup, createResource } from "solid-js";
-import { invoke } from "@tauri-apps/api/core";
-// import G6 from "@antv/g6";
+import {
+  createSignal,
+  createEffect,
+  createMemo,
+  createResource,
+  onMount,
+  onCleanup,
+} from "solid-js";
 import * as G6 from "@antv/g6";
+import { invoke } from "@tauri-apps/api/core";
+// import "./NodeGraph.css";
 
-export default function ReticulumGraph() {
-  let container;
-  let graph;
+function ageHours(timestamp) {
+  if (!timestamp) return 0;
+  const ms = Date.now() - new Date(timestamp).getTime();
+  return ms / (1000 * 60 * 60);
+}
 
-  // We fetch the "Smart" graph data we built in the previous Surreal queries
-  const [data] = createResource(async () => await invoke("get_graph_data"));
+// Interpolate between two hex colors by t (0–1)
+function lerpColor(hex1, hex2, t) {
+  const parse = (h) => [
+    parseInt(h.slice(1, 3), 16),
+    parseInt(h.slice(3, 5), 16),
+    parseInt(h.slice(5, 7), 16),
+  ];
+  const [r1, g1, b1] = parse(hex1);
+  const [r2, g2, b2] = parse(hex2);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
+}
 
+// Map hops → node size (tweak min/max to taste)
+function hopsToSize(hops) {
+  const min = 12, max = 40, maxHops = 10;
+  const clamped = Math.min(hops ?? 0, maxHops);
+  return min + (max - min) * (clamped / maxHops);
+}
+
+const NodeGraph = () => {
+  /* ---------- refs & signals ---------- */
+  const [container, setContainer] = createSignal(null); // <div ref={setContainer} />
+  const [graph, setGraph] = createSignal(null);        // G6 instance
+
+  /* ---------- fetch raw announces ---------- */
+  const [annos] = createResource(async () => {
+    return await invoke("fetch_announces_db");
+  });
+
+  /* ---------- build graph data ---------- */
+  const graphData = createMemo(() => {
+    const data = annos();
+    if (!data) return { nodes: [], edges: [] };
+  
+    const nodeMap = new Map();
+    const edges = [];
+  
+    data.forEach((ann) => {
+      const destId = ann.destination;
+      const transId = ann.transport_node;
+  
+      if (!nodeMap.has(destId)) {
+        const age = ageHours(ann.timestamp);
+        const MAX_AGE_HOURS = 24;
+  
+        // t=0 → fresh blue, t=1 → fully gray
+        const t = Math.min(age / MAX_AGE_HOURS, 1);
+        const fill = lerpColor("#2196f3", "#9e9e9e", t);
+        const opacity = 1 - t * 0.6; // fade to 40% opacity at max age
+  
+        nodeMap.set(destId, {
+          id: destId,
+          label: destId.slice(-8),
+          hops: ann.hops ?? 0,
+          node_type: "destination",
+          timestamp: ann.timestamp,
+          style: {
+            fill,
+            opacity,
+            size: hopsToSize(ann.hops),
+            stroke: "#1565c0",
+            lineWidth: 1,
+          },
+        });
+      }
+  
+      if (transId && !nodeMap.has(transId)) {
+        nodeMap.set(transId, {
+          id: transId,
+          label: transId.slice(-8),
+          hops: 0,
+          node_type: "neighbor",
+          style: {
+            fill: "#4caf50",
+            stroke: "#2e7d32",
+            size: 40,         // transit nodes are a fixed smaller size
+            lineWidth: 1.5,
+          },
+        });
+      }
+  
+      if (transId) {
+        edges.push({
+          source: transId,
+          target: destId,
+          style: { stroke: "#a0a0a0", lineWidth: 1 },
+        });
+      }
+    });
+  
+    return { nodes: Array.from(nodeMap.values()), edges };
+  });
+
+  /* ---------- create G6 graph on mount ---------- */
   onMount(() => {
-    // 1. Initialize Graph
-    graph = new G6.Graph({
-      container: container,
-      width: container.scrollWidth,
-      height: container.scrollHeight || 800,
-      fitView: true,
+
+    const g = new G6.Graph({
+      container: container(),
+      width: 1200,
+      height: 800,
+      animation: false,
+      autoFit: "view",
+      behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
       layout: {
-        type: 'radial',
-        unitRadius: 180,        // Distance between rings
-        preventOverlap: true,
-        maxIteration: 1000,
-        sortBy: 'hops',         // Keep rings sorted by hops
-        strictRadial: true,     // Force nodes onto the ring lines
+        type: "force",
+        linkDistance: 100,
+        maxIteration: 300,
       },
-      defaultNode: {
-        size: 20,
-        style: {
-          fill: '#1e90ff',
-          stroke: '#fff',
-          lineWidth: 1,
-        },
-        labelCfg: {
-          style: { fill: '#fff', fontSize: 10 }
-        }
+      node: {
+        style: (model) => ({
+          ...model.style,                    // spread per-node style from data
+          labelText: model.label,
+          labelFill: model.style?.opacity < 0.6 ? "#aaa" : "#333", // dim label too
+          labelFontSize: 11,
+          labelPlacement: "bottom",
+        }),
       },
-      defaultEdge: {
-        style: {
-          stroke: '#444',
-          lineWidth: 1,
-          opacity: 0.6,
-        },
+      edge: {
+        style: (model) => ({
+          ...model.style,
+        }),
       },
-      modes: {
-        default: ['drag-canvas', 'zoom-canvas', 'drag-node'],
+      canvas: {
+        background: "#1a1a1a", // any CSS color
       },
     });
 
-    // 2. React to data changes
-    if (data()) {
-      renderGraph(data());
-    }
+    setGraph(g);
   });
 
-  const renderGraph = (raw) => {
-    // Transform SurrealDB data into G6 format { nodes: [], edges: [] }
-    const nodes = raw.map(n => ({
-      id: n.id,
-      label: n.id.slice(-8), // Short hex for label
-      hops: n.hops,
-      // Color coding by role
-      style: {
-        fill: n.node_type === 'origin' ? '#ff4757' : 
-              n.node_type === 'neighbor' ? '#2ed573' : '#1e90ff'
-      }
-    }));
+  /* ---------- update graph when data changes ---------- */
+  createEffect(() => {
+    const g = graph();
+    const data = graphData();
+    if (!g || !data.nodes.length) return;
+    g.setData(data);
+    g.render().then(() => g.fitView());
+  });
 
-    const edges = raw
-      .filter(n => n.parent) // Only nodes with a parent get an edge
-      .map(n => ({
-        source: n.parent,
-        target: n.id
-      }));
-
-    graph.data({ nodes, edges });
-    graph.render();
-  };
-
+  /* ---------- cleanup ---------- */
   onCleanup(() => {
-    if (graph) graph.destroy();
+    const g = graph();
+    if (g) g.destroy();
   });
 
-  return (
-    <div style={{ width: "100%", height: "100vh", background: "#1a1a1a" }}>
-      <div ref={container} style={{ width: "100%", height: "100%" }} />
-    </div>
-  );
-}
+  /* ---------- render ---------- */
+  return <div class="node-graph" ref={setContainer} />;
+};
+
+export default NodeGraph;
