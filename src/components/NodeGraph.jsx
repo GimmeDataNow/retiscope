@@ -8,7 +8,7 @@ import {
 } from "solid-js";
 import * as G6 from "@antv/g6";
 import { invoke } from "@tauri-apps/api/core";
-// import "./NodeGraph.css";
+import "./NodeGraph.css";
 
 function ageHours(timestamp) {
   if (!timestamp) return 0;
@@ -117,15 +117,22 @@ const NodeGraph = () => {
 
     const g = new G6.Graph({
       container: container(),
-      width: 1200,
-      height: 800,
       animation: false,
       autoFit: "view",
       behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
       layout: {
         type: "force",
+        // linkDistance: 100,
+        // maxIteration: 300,
+        animated: true,
+        interval: 0.02,
         linkDistance: 100,
-        maxIteration: 300,
+        nodeStrength: -30,    // repulsion between nodes (more negative = more spread)
+        edgeStrength: 0.5,    // how strongly edges pull nodes together
+        collideStrength: 0.8, // prevents node overlap
+        alpha: 0.1,           // initial simulation energy (0–1)
+        alphaDecay: 0.05,     // how fast simulation cools down (lower = runs longer)
+        alphaMin: 0.001,      // stops when alpha drops below this
       },
       node: {
         style: (model) => ({
@@ -141,13 +148,28 @@ const NodeGraph = () => {
           ...model.style,
         }),
       },
-      canvas: {
-        background: "#1a1a1a", // any CSS color
-      },
     });
 
     setGraph(g);
+
+    const onResize = () => {
+      g.fitView();
+    };
   });
+
+  const [simulating, setSimulating] = createSignal(false);
+
+  const toggleSim = () => {
+    const g = graph();
+    if (!g) return;
+    if (simulating()) {
+      g.stopLayout();
+      setSimulating(false);
+    } else {
+      g.layout();
+      setSimulating(true);
+    }
+  };
 
   /* ---------- update graph when data changes ---------- */
   createEffect(() => {
@@ -165,7 +187,29 @@ const NodeGraph = () => {
   });
 
   /* ---------- render ---------- */
-  return <div class="node-graph" ref={setContainer} />;
+  // return <div class="node-graph" ref={setContainer} />;
+  return (
+  <>
+    <div class="node-graph" ref={setContainer} />
+    <button
+      onClick={toggleSim}
+      style={{
+        position: "absolute",
+        bottom: "16px",
+        right: "16px",
+        padding: "8px 16px",
+        background: simulating() ? "#ef5350" : "#4caf50",
+        color: "#fff",
+        border: "none",
+        borderRadius: "6px",
+        cursor: "pointer",
+        "font-size": "13px",
+      }}
+    >
+      {simulating() ? "Stop" : "Simulate"}
+    </button>
+  </>
+);
 };
 
 export default NodeGraph;
