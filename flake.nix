@@ -1,75 +1,66 @@
 {
-  description = "Retiscope development environment";
+  description = "Adabraka-UI Development Environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Provides the latest Rust toolchains
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs {
-          inherit system overlays;
-          config.allowUnfree = true;
+        pkgs = import nixpkgs { inherit system overlays; };
+
+        rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
         };
 
-        # Grouping the specific libraries from your working dep.nix
-        libs = with pkgs; [
-          at-spi2-atk
-          atkmm
-          cairo
-          gdk-pixbuf
-          glib
-          gtk3
-          harfbuzz
-          librsvg
-          libsoup_3
-          pango
-          webkitgtk_4_1
+        runtimeDeps = with pkgs; [
+          vulkan-loader
+          libxkbcommon
+          wayland
+          libX11
+          libXcursor
+          libXi
+          libxcb      # Added for X11 connection support
+          alsa-lib
+        ];
+
+        buildDeps = with pkgs; [
+          pkg-config
+          fontconfig
+          freetype
           openssl
-
-          # needed for reticulum-rs
-          protobuf
-
-          libclang
-          vite
-
-          # surrealdb
-          # surrealdb
+          dbus
+          protobuf         # Added for protoc
         ];
       in
       {
         devShells.default = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-            gobject-introspection
-            cargo-tauri
-            bun
-            # Use the overlay for a better Rust experience
-            (rust-bin.stable.latest.default.override {
-              extensions = [ "rust-src" "rust-analyzer" ];
-            })
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.pkg-config
+            pkgs.protobuf  # Also here for the binary
           ];
 
-          buildInputs = libs;
+          buildInputs = buildDeps ++ runtimeDeps;
+
+          # EXPLICIT ENVIRONMENT VARIABLES
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
+          PROTOC = "${pkgs.protobuf}/bin/protoc"; # Tells cargo where protoc is
+          PROTOC_INCLUDE = "${pkgs.protobuf}/include";
 
           shellHook = ''
-            # Fix for icons and scaling
-            export XDG_DATA_DIRS=${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS
-            
-            # Potential fix for the "White Screen" / Network issues
-            export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules/"
-            
-            # export CPATH="${pkgs.glibc.dev}/include"
-            # Ensure Rust can find the libraries at compile/link time
-            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH
-            
-            echo "Retiscope development environment is active"
-            alias "s=surreal start -u a -p a surrealkv://$HOME/.cache/retiscope/surreal.db"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath runtimeDeps}:$LD_LIBRARY_PATH
+            # This helps GPUI detect the platform
+            export XDG_SESSION_TYPE=wayland
+            echo "--- Adabraka-UI + Retiscope Dev Environment ---"
+            echo "Protoc: $(protoc --version)"
           '';
         };
-      });
+  });
 }
