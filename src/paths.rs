@@ -46,6 +46,13 @@ impl AppPaths {
     pub fn config_file(&self, name: &str) -> PathBuf {
         self.config.join(name)
     }
+
+    pub fn get_connections_path(&self) -> PathBuf {
+        self.config_file("connections.toml")
+    }
+    pub fn get_database_config_path(&self) -> PathBuf {
+        self.config_file("database.toml")
+    }
 }
 
 pub fn load_config_with_default<T>(path: PathBuf, default: T) -> T

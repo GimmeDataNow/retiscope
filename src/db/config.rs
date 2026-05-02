@@ -1,7 +1,11 @@
+#[allow(unused_imports)]
+use tracing::{debug, error, info, info_span, instrument, trace, warn};
+
 use crate::db::RetiscopeDB;
 use crate::db::surrealdb;
 use crate::errors::RetiscopeError;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Configuration settings for the Retiscope database layer.
@@ -70,6 +74,26 @@ impl Default for DatabaseConfig {
 }
 
 impl DatabaseConfig {
+    /// Load the database configuration from a file on disk.
+    ///
+    /// The function reads the file at `path`, parses it as TOML, and
+    /// returns the resulting `DatabaseConfig`.  If the file cannot be
+    /// read or the TOML is invalid, the function logs a warning
+    /// and falls back to `DatabaseConfig::default()`.
+    #[instrument]
+    pub fn load_database_config(path: PathBuf) -> DatabaseConfig {
+        std::fs::read_to_string(&path)
+            .and_then(|contents| {
+                toml::from_str::<DatabaseConfig>(&contents)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    .inspect_err(|_| error!("Failed to parse file"))
+            })
+            .unwrap_or_else(|_| {
+                warn!("Failed to read file, using defaults");
+                DatabaseConfig::default()
+            })
+    }
+
     /// Factory method to instantiate the concrete database implementation.
     ///
     /// Based on the variant held in `self.database`, this method initializes
