@@ -8,10 +8,6 @@ use crate::core::{AnnounceData, StoredAnnounce, StoredNode};
 
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
-use std::sync::Arc;
-
-pub struct DbState(pub Arc<dyn RetiscopeDB>);
-impl gpui::Global for DbState {}
 
 #[allow(dead_code)]
 #[async_trait]

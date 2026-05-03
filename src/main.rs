@@ -3,8 +3,6 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
 
 use clap::Parser;
-use gpui::*;
-use gpui_component::*;
 
 mod arguments;
 mod core;
@@ -18,7 +16,7 @@ mod ui;
 #[tokio::main]
 async fn main() {
     // logging
-    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=warn,surrealdb=error");
+    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=info,surrealdb=error");
     let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
     tracing_subscriber::registry()
         .with(filter_layer)
@@ -27,44 +25,38 @@ async fn main() {
 
     let args = arguments::Args::parse();
 
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+
     match args.command {
         arguments::Commands::Daemon => {
-            let _ = daemon::run().await;
+            info!("Starting Retiscope Daemon");
+            let _stream = daemon::run(cancel_token.clone()).await;
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Ctrl+C received, shutting down gracefully...");
+                }
+                _ = cancel_token.cancelled() => {
+                    error!("Critical background task failed. Exiting...");
+                }
+            }
         }
         arguments::Commands::Gui => {
-            let _ = ui::run();
+            // let stream = daemon::run().await;
+            // let _ = ui::run(stream);
+            // let _ = tokio::signal::ctrl_c().await;
+            info!("Starting Retiscope GUI...");
+            let bundle = daemon::run(cancel_token.clone()).await;
+
+            // In GUI mode, we usually want the program to exit when the window closes
+            // ui::run should be a blocking call.
+            ui::run(bundle);
+
+            // Signal background tasks to stop once the UI window is closed
+            cancel_token.cancel();
+            info!("GUI closed, cleaning up...");
         }
         _ => {
             panic!("This feature has not been implemented yet")
         }
     }
 }
-
-// pub async fn run() -> tokio::sync::broadcast::Sender<AnnounceData> {
-//     // Get Paths
-//     let app_paths = AppPaths::init();
-
-//     // Setup DB
-//     let db = DatabaseConfig::load_database_config(app_paths.get_database_config_path())
-//         .create_db()
-//         .await
-//         .unwrap();
-
-//     // Setup Transport
-//     let transport = setup_transport();
-//     let _ = add_transport_routes(&transport, app_paths.get_connections_path()).await;
-
-//     // Initialize Engine
-//     let engine = CaptureEngine::new(transport);
-//     let (db_tx, db_rx) = mpsc::channel(100);
-
-//     // Start Tasks
-//     spawn_batcher(db, db_rx).await;
-
-//     let live_tx = engine.live_tx.clone();
-//     tokio::spawn(async move {
-//         engine.run(db_tx).await;
-//     });
-
-//     live_tx
-// }

@@ -17,8 +17,6 @@ pub enum Commands {
     Database,
     /// Run a node with services
     Service,
-
-    // #[cfg(feature = "gui")]
     /// Launch the graphical interface
     Gui,
 }

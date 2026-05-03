@@ -6413,6 +6413,7 @@ dependencies = [
  "surrealdb",
  "surrealdb-types",
  "tokio",
+ "tokio-util",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",

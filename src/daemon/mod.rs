@@ -2,11 +2,11 @@ use tracing::Instrument;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, interval};
+use tokio_util::sync::CancellationToken;
 
 use rand_core::OsRng;
-use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::transport::{Transport, TransportConfig};
 
@@ -15,23 +15,27 @@ use crate::db::config::DatabaseConfig;
 use crate::network::config::add_transport_routes;
 use crate::paths::AppPaths;
 
+pub struct StreamBundle {
+    pub transport: Transport,
+    // pub raw_packets: broadcast::Receiver<reticulum::packet::Packet>,
+    pub announces: broadcast::Sender<AnnounceData>,
+}
+
 #[allow(dead_code)]
 #[instrument]
-pub async fn run() {
-    info!("Listener started");
+pub async fn run(cancel: CancellationToken) -> StreamBundle {
+    info!("Daemon started");
     let app_paths = AppPaths::init();
 
-    // database
+    // db
     let db = DatabaseConfig::load_database_config(app_paths.get_database_config_path())
         .create_db()
         .await
-        .inspect_err(|e| error!(error = %e, "Failed to connect to the database"))
         .expect("Failed to connect to the database");
 
-    // this is needed
     let _ = db.init_db().await;
 
-    // configure the transport
+    // transport
     let mut transport_config = TransportConfig::new(
         "reticulum-daemon",
         &PrivateIdentity::new_from_rand(OsRng),
@@ -39,96 +43,86 @@ pub async fn run() {
     );
     transport_config.set_restart_outlinks(true);
 
-    // transport
     let transport = Transport::new(transport_config);
     let _ = add_transport_routes(&transport, app_paths.get_connections_path()).await;
 
+    // internal channels
     let (tx, mut rx) = mpsc::channel::<AnnounceData>(100);
 
-    let db_clone = db.clone();
+    // returned (external) channels
+    let (ext_tx, _) = broadcast::channel::<AnnounceData>(1024);
+
     // batcher task
+    let db_clone = db.clone();
     let batcher_span = info_span!("batcher_task");
     tokio::spawn(
         async move {
             let mut batch = Vec::new();
             let mut timer = interval(Duration::from_secs(5));
-
             loop {
                 tokio::select! {
                     Some(data) = rx.recv() => {
                         batch.push(data);
-                        // flush early if batch is huge
-                        if batch.len() >= 1000 {
-                            let _ = db.save_announces(&mut batch).await;
+                        if batch.len() >= 10 {
+                            let _ = db_clone.save_announces(&mut batch).await;
                         }
                     }
                     _ = timer.tick() => {
                         if !batch.is_empty() {
-                            let _ = db.save_announces(&mut batch).await;
+                            let _ = db_clone.save_announces(&mut batch).await;
                         }
                     }
                 }
             }
         }
-        // .instrument(tracing::Span::current()),
         .instrument(batcher_span),
     );
 
-    // This task is to demonstrate the live updates from the database
+    // recv and pass data forward
+    let mut announce_receiver = transport.recv_announces().await;
+    let mut a = transport.iface_rx();
+
+    // temp
     tokio::spawn(async move {
-        let mut a = db_clone
-            .watch_announces()
-            .await
-            .expect("watch_announces() failed");
-        while let Ok(_data) = a.recv().await {
-            // info!(watch_return = ?data, "watch_announces");
+        while let Ok(ok) = a.recv().await {
+            // ok.packet.;
+            info!(hops = %ok.packet.header.hops, destination = ok.packet.destination.to_hex_string() ,"packet");
         }
-        let mut b = db_clone.watch_nodes().await.expect("watch_nodes() failed");
-        while let Ok(data) = b.recv().await {
-            info!(watch_return = ?data, "watch_nodes");
-        }
-
-        // let c = db_clone
-        //     .fetch_announces()
-        //     .await
-        //     .expect("fetch_announces() failed");
-
-        // info!(payload = ?c, "");
-
-        // let d = db_clone
-        //     .fetch_nodes()
-        //     .await
-        //     .expect("fetch_announces() failed");
-        // info!(payload = ?d, "");
-
-        // warn!("tasks have finished")
+        warn!("Announce ifac loop exited!");
     });
 
-    // send announces to the batcher task
-    let mut announce_receiver = transport.recv_announces().await;
-    while let Ok(ok) = announce_receiver.recv().await {
-        // format data
-        let data = AnnounceData {
-            hops: ok.packet.header.hops,
-            transport_node: ok.packet.transport,
-            destination: ok.packet.destination,
-            iface: ok.iface,
-        };
+    let cloned_channel = ext_tx.clone();
+    tokio::spawn(async move {
+        info!("Starting Announce Monitor...");
 
-        trace!(
-            hops = data.hops,
-            iface = format_args!("<{}>", data.iface.to_hex_string()),
-            transport_node = format_args!(
-                "<{}>",
-                data.transport_node
-                    .map(|h: AddressHash| h.to_hex_string())
-                    .unwrap_or_else(|| "Self".to_string())
-            ),
-            destination = format_args!("<{}>", data.destination.to_hex_string()),
-            "Announce Trace"
-        );
+        // Use a loop to keep the task alive even if the receiver errors out initially
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
 
-        // send to batcher (non-blocking)
-        let _ = tx.send(data).await;
+            while let Ok(ok) = announce_receiver.recv().await {
+                let data = AnnounceData {
+                    hops: ok.packet.header.hops,
+                    transport_node: ok.packet.transport,
+                    destination: ok.packet.destination,
+                    iface: ok.iface,
+                };
+
+                let _ = cloned_channel.send(data);
+            }
+
+            // If we reach here, the receiver died.
+            // Check if we should quit or try to reconnect.
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            warn!("Network receiver disconnected. Retrying in 10s...");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    });
+
+    StreamBundle {
+        transport,
+        announces: ext_tx,
     }
 }

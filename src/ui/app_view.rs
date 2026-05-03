@@ -5,15 +5,34 @@ use gpui_component::sidebar::*;
 use gpui_component::theme::Theme;
 use gpui_component::*;
 
+use std::collections::HashMap;
+use tokio::sync::broadcast;
+
+use crate::core::AnnounceData;
 use crate::ui::pages::dashboard::Dashboard;
 use crate::ui::pages::settings::Settings;
-use std::collections::HashMap;
 
 // pages
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageId {
     Dashboard,
     Settings,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub raw_announces: Vec<AnnounceData>,
+}
+
+impl AppState {
+    pub fn add_announce(&mut self, data: AnnounceData, cx: &mut Context<Self>) {
+        self.raw_announces.push(data);
+        if self.raw_announces.len() > 100 {
+            self.raw_announces.remove(0);
+        }
+        // This is the magic part: it notifies anything listening to this model
+        cx.notify();
+    }
 }
 
 // view
@@ -27,7 +46,6 @@ impl AppView {
     // build all pages
     pub fn build(cx: &mut Context<'_, Self>) -> Self {
         let mut pages: HashMap<PageId, AnyView> = HashMap::new();
-
         // Dashboard
         pages.insert(
             PageId::Dashboard,
