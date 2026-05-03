@@ -1,15 +1,18 @@
 use gpui::*;
 use gpui_component::Icon;
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::scroll::ScrollableElement;
 use gpui_component::sidebar::*;
 use gpui_component::theme::Theme;
 use gpui_component::*;
 
-use std::collections::HashMap;
-use tokio::sync::broadcast;
+use reticulum::iface::RxMessage;
 
-use crate::core::AnnounceData;
+use std::collections::HashMap;
+
+use crate::daemon::StreamBundle;
 use crate::ui::pages::dashboard::Dashboard;
+use crate::ui::pages::packets::PacketsPage;
 use crate::ui::pages::settings::Settings;
 
 // pages
@@ -17,34 +20,22 @@ use crate::ui::pages::settings::Settings;
 pub enum PageId {
     Dashboard,
     Settings,
+    Packets,
 }
 
-#[derive(Clone)]
-pub struct AppState {
-    pub raw_announces: Vec<AnnounceData>,
-}
-
-impl AppState {
-    pub fn add_announce(&mut self, data: AnnounceData, cx: &mut Context<Self>) {
-        self.raw_announces.push(data);
-        if self.raw_announces.len() > 100 {
-            self.raw_announces.remove(0);
-        }
-        // This is the magic part: it notifies anything listening to this model
-        cx.notify();
-    }
-}
+// pub struct AppState
 
 // view
 pub struct AppView {
     pub active_page: PageId,
     pub pages: HashMap<PageId, AnyView>,
     pub sidebar_collapsed: bool,
+    pub packets: Vec<RxMessage>,
 }
 
 impl AppView {
     // build all pages
-    pub fn build(cx: &mut Context<'_, Self>) -> Self {
+    pub fn build(cx: &mut Context<'_, Self>, mut stream: StreamBundle) -> Self {
         let mut pages: HashMap<PageId, AnyView> = HashMap::new();
         // Dashboard
         pages.insert(
@@ -58,10 +49,52 @@ impl AppView {
         // Settings
         pages.insert(PageId::Settings, cx.new(|_| Settings { count: 0 }).into());
 
+        let weak = cx.weak_entity();
+        pages.insert(
+            PageId::Packets,
+            cx.new(|_| PacketsPage::new(weak.upgrade().unwrap())).into(),
+        );
+
+        let mut rx = stream.raw_interface_packets.subscribe();
+
+        cx.spawn(async move |this, cx| {
+            // while let Ok(msg) = rx.recv().await {
+            //     let update_result = this.update(cx, |view, cx| {
+            //         view.packets.push(msg);
+            //         cx.notify();
+            //     });
+
+            //     if update_result.is_err() {
+            //         break;
+            //     }
+            // }
+            loop {
+                match rx.recv().await {
+                    Ok(msg) => {
+                        this.update(cx, |view, cx| {
+                            view.packets.push(msg);
+                            eprintln!("total packets: {}", view.packets.len());
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("LAGGED: dropped {} packets", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        eprintln!("CHANNEL CLOSED");
+                        break;
+                    }
+                }
+            }
+        })
+        .detach();
+
         Self {
             sidebar_collapsed: false,
             active_page: PageId::Dashboard,
             pages,
+            packets: Vec::new(),
         }
     }
 }
@@ -122,6 +155,15 @@ impl Render for AppView {
                                 })),
                         )
                         .child(
+                            SidebarMenuItem::new("Packets")
+                                .icon(Icon::empty().path("icons/telescope.svg"))
+                                .active(active_id == PageId::Packets)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.active_page = PageId::Packets;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
                             SidebarMenuItem::new("Settings")
                                 .icon(Icon::empty().path("icons/telescope.svg"))
                                 .active(active_id == PageId::Settings)
@@ -139,6 +181,19 @@ impl Render for AppView {
                 .flex_1()
                 .h_full()
                 .bg(cx.theme().background)
+                // .child(
+                //     div()
+                //         .flex()
+                //         .flex_col()
+                //         .size_full()
+                //         .overflow_y_scrollbar()
+                //         .children(self.packets.iter().enumerate().map(|(i, pkt)| {
+                //             div().px_3().py_1().text_sm().child(format!(
+                //                 "destination {}",
+                //                 pkt.packet.destination.to_hex_string()
+                //             ))
+                //         })),
+                // )
                 .child(current_page),
         )
     }

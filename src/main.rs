@@ -16,7 +16,7 @@ mod ui;
 #[tokio::main]
 async fn main() {
     // logging
-    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=info,surrealdb=error");
+    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=warn,surrealdb=error");
     let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
     tracing_subscriber::registry()
         .with(filter_layer)
@@ -41,19 +41,13 @@ async fn main() {
             }
         }
         arguments::Commands::Gui => {
-            // let stream = daemon::run().await;
-            // let _ = ui::run(stream);
-            // let _ = tokio::signal::ctrl_c().await;
             info!("Starting Retiscope GUI...");
             let bundle = daemon::run(cancel_token.clone()).await;
 
-            // In GUI mode, we usually want the program to exit when the window closes
-            // ui::run should be a blocking call.
             ui::run(bundle);
 
-            // Signal background tasks to stop once the UI window is closed
             cancel_token.cancel();
-            info!("GUI closed, cleaning up...");
+            info!("GUI closed, cleaning up");
         }
         _ => {
             panic!("This feature has not been implemented yet")
