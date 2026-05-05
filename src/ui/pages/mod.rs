@@ -1,3 +1,3 @@
 pub mod dashboard;
-pub mod packets;
+pub mod packets_view;
 pub mod settings;
