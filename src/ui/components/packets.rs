@@ -1,3 +1,6 @@
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
 // use gpui::AsyncAppContext;
 use gpui::AsyncWindowContext;
 use gpui::*;
@@ -72,20 +75,80 @@ impl StateModel {
         let this_model = this.clone();
 
         // This will now work because App implements the spawn methods
+        // cx.spawn(move |cx: &mut AsyncApp| {
+        //     let mut cx_owned = cx.clone();
+        //     let this_model = this_model.clone();
+        //     let mut rx = channel.subscribe();
+
+        //     async move {
+        //         while let Ok(msg) = rx.recv().await {
+        //             this_model
+        //                 .inner
+        //                 .update::<(), AsyncApp>(&mut cx_owned, |state, cx| {
+        //                     state.items.push(msg);
+        //                     cx.notify();
+        //                 })
+        //                 .ok();
+        //         }
+        //         error!("rec failed")
+        //     }
+        // })
+        // .detach();
+
+        // let mut cx_clon = cx.clone();
+        let mut cx_async = cx.to_async();
+        let mut rx = channel.subscribe();
+
+        // cx.background_spawn(async move {
+        //     // let mut rx = channel.subscribe();
+        //     // let mut cx_clon = cx.
+        //     loop {
+        //         match rx.recv().await {
+        //             Ok(msg) => {
+        //                 // cx.up
+        //                 // cx.update::<(), AsyncApp>(&mut cx_owned, |state, cx| {
+        //                 //     state.items.push(msg);
+        //                 //     cx.notify();
+        //                 // })
+        //                 // .ok();
+        //                 cx.global_mut::<StateModel>();
+        //             }
+
+        //             _ => {}
+        //         }
+        //     }
+        // })
+        // .detach();
         cx.spawn(move |cx: &mut AsyncApp| {
+            // 1. Clone the reference into an owned AsyncApp
+            // so it can live inside the 'static async block
             let mut cx_owned = cx.clone();
             let this_model = this_model.clone();
             let mut rx = channel.subscribe();
 
             async move {
-                while let Ok(msg) = rx.recv().await {
-                    this_model
-                        .inner
-                        .update::<(), AsyncApp>(&mut cx_owned, |state, cx| {
-                            state.items.push(msg);
-                            cx.notify();
-                        })
-                        .ok();
+                loop {
+                    match rx.recv().await {
+                        Ok(msg) => {
+                            // 2. Use cx_owned here
+                            this_model
+                                .inner
+                                .update::<(), AsyncApp>(&mut cx_owned, |state, cx| {
+                                    state.items.push(msg);
+                                    debug!("Packet: {}", state.items.len());
+
+                                    cx.notify();
+                                })
+                                .ok();
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("Lagged by {} packets", n);
+                            continue;
+                        }
+                        Err(_) => {
+                            error!("receive loop failed")
+                        }
+                    }
                 }
             }
         })
