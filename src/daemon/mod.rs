@@ -51,7 +51,7 @@ pub async fn run(cancel: CancellationToken) -> StreamBundle {
     // channels
     let (tx, mut rx) = mpsc::channel::<AnnounceData>(100); // channel for the db sync
     let (ext_tx, _) = broadcast::channel::<AnnounceData>(1024); // returned (external) channels
-    let (packet_tx, _) = broadcast::channel::<RxMessage>(1024); // packet channel
+    let (packet_tx, _keep_alive_rx) = broadcast::channel::<RxMessage>(1024); // packet channel
 
     // batcher task
     let batcher_span = info_span!("batcher_task");
@@ -84,12 +84,13 @@ pub async fn run(cancel: CancellationToken) -> StreamBundle {
     let packet_tx_clone = packet_tx.clone();
     let cancel_clone = cancel.clone();
     tokio::spawn(async move {
+        let mut iface_rx_msgs = t_clone_1.iface_rx();
+
         loop {
-            let mut iface_rx_msgs = t_clone_1.iface_rx();
 
             while let Ok(ok) = iface_rx_msgs.recv().await {
                 debug!(hops = %ok.packet.header.hops, destination = ok.packet.destination.to_hex_string(), transport = ok.packet.transport.map(|a| a.to_hex_string()) ,"packet");
-                let _ = packet_tx_clone.send(ok);
+                let _ = packet_tx_clone.send(ok).inspect_err(|e| error!(error = %e, "Failed to send packet"));
             }
             if cancel_clone.is_cancelled() {
                 break;
