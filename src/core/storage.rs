@@ -6,15 +6,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 // use futures::channel::mpsc;
 use reticulum::hash::AddressHash;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio::time::{Duration, interval};
 
-use crate::core::AnnounceData;
 use crate::core::serde_helpers::{
     deserialize_hash, deserialize_opt_hash, serialize_hash, serialize_opt_hash,
 };
-use crate::db::RetiscopeDB;
 
 /// Persisted announcement stored in the database.
 /// Includes capture metadata (`id`, `timestamp`) and deserialisation helpers.
@@ -66,26 +61,4 @@ pub struct StoredNode {
 
     /// Most recent time the node was observed.
     pub last_seen: chrono::DateTime<chrono::Utc>,
-}
-
-pub async fn spawn_batcher(db: Arc<dyn RetiscopeDB>, mut rx: mpsc::Receiver<AnnounceData>) {
-    tokio::spawn(async move {
-        let mut batch = Vec::new();
-        let mut timer = interval(Duration::from_secs(5));
-        loop {
-            tokio::select! {
-                Some(data) = rx.recv() => {
-                    batch.push(data);
-                    if batch.len() >= 1000 {
-                        let _ = db.save_announces(&mut batch).await;
-                    }
-                }
-                _ = timer.tick() => {
-                    if !batch.is_empty() {
-                        let _ = db.save_announces(&mut batch).await;
-                    }
-                }
-            }
-        }
-    });
 }

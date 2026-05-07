@@ -55,6 +55,7 @@ impl AppPaths {
     }
 }
 
+#[allow(dead_code)]
 pub fn load_config_with_default<T>(path: PathBuf, default: T) -> T
 where
     T: serde::Serialize + serde::de::DeserializeOwned,

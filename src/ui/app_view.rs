@@ -1,4 +1,3 @@
-use reticulum::iface::RxMessage;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -12,10 +11,8 @@ use gpui_component::*;
 use std::collections::HashMap;
 
 use crate::daemon::StreamBundle;
-use crate::ui::pages::dashboard::Dashboard;
-// use crate::ui::pages::packets::PacketsPage;
-use crate::ui::components::packets::State;
 use crate::ui::components::packets::StateModel;
+use crate::ui::pages::dashboard::Dashboard;
 use crate::ui::pages::packets_view::PacketsPage;
 
 use crate::ui::pages::settings::Settings;
@@ -37,7 +34,7 @@ pub struct AppView {
 
 impl AppView {
     // build all pages
-    pub fn build(cx: &mut Context<'_, Self>, mut stream: StreamBundle) -> Self {
+    pub fn build(cx: &mut Context<'_, Self>, stream: StreamBundle) -> Self {
         let mut pages: HashMap<PageId, AnyView> = HashMap::new();
 
         StateModel::init(cx, stream.raw_interface_packets);

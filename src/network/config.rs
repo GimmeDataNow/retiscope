@@ -3,10 +3,8 @@ use tracing::{debug, error, info, info_span, instrument, trace, warn};
 
 use crate::errors::RetiscopeError;
 
-use rand_core::OsRng;
-use reticulum::identity::PrivateIdentity;
 use reticulum::iface::tcp_client::TcpClient;
-use reticulum::transport::{Transport, TransportConfig};
+use reticulum::transport::Transport;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -89,16 +87,4 @@ pub async fn add_transport_routes(
     }
     info!(started = started, skipped = skipped, "Interfaces started!");
     Ok(())
-}
-
-pub fn setup_transport() -> Transport {
-    let mut transport_config = TransportConfig::new(
-        "reticulum-daemon",
-        &PrivateIdentity::new_from_rand(OsRng),
-        false,
-    );
-    transport_config.set_restart_outlinks(true);
-
-    // init transport
-    Transport::new(transport_config)
 }

@@ -54,7 +54,7 @@ impl StateModel {
         let model_handle = inner.clone();
 
         // GPUI timer task - drains the mutex into State every 50ms
-        let listener_task = cx.spawn(async move |mut cx| {
+        let listener_task = cx.spawn(async move |cx| {
             let mut count = 0;
             loop {
                 cx.background_spawn(async {
