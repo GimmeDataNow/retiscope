@@ -83,25 +83,28 @@ pub async fn run(cancel: CancellationToken) -> StreamBundle {
     let t_clone_1 = transport.clone();
     let packet_tx_clone = packet_tx.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
-        let mut iface_rx_msgs = t_clone_1.iface_rx();
+    tokio::spawn(
+        async move {
+            let mut iface_rx_msgs = t_clone_1.iface_rx();
 
-        loop {
+            loop {
+                while let Ok(ok) = iface_rx_msgs.recv().await {
+                    debug!(hops = %ok.packet.header.hops, destination = ok.packet.destination.to_hex_string(), transport = ok.packet.transport.map(|a| a.to_hex_string()) ,"packet");
+                    let _ = packet_tx_clone
+                        .send(ok)
+                        .inspect_err(|e| error!(error = %e, "Failed to send packet"));
+                }
+                if cancel_clone.is_cancelled() {
+                    break;
+                }
 
-            while let Ok(ok) = iface_rx_msgs.recv().await {
-                debug!(hops = %ok.packet.header.hops, destination = ok.packet.destination.to_hex_string(), transport = ok.packet.transport.map(|a| a.to_hex_string()) ,"packet");
-                let _ = packet_tx_clone.send(ok).inspect_err(|e| error!(error = %e, "Failed to send packet"));
+                warn!("Network receiver disconnected. Retrying in 10s...");
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
-            if cancel_clone.is_cancelled() {
-                break;
-            }
-
-            warn!("Network receiver disconnected. Retrying in 10s...");
-            tokio::time::sleep(Duration::from_secs(10)).await;
-
+            warn!("Announce ifac loop exited!");
         }
-        warn!("Announce ifac loop exited!");
-    }.instrument(raw_packets_task));
+        .instrument(raw_packets_task),
+    );
 
     let announce_task = info_span!("announce_task");
     let cloned_channel = ext_tx.clone();

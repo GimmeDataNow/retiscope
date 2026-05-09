@@ -86,7 +86,11 @@ impl Render for AppView {
         let theme_button = Button::new("theme")
             .ghost()
             .small()
-            .icon(Icon::empty().path("icons/telescope.svg"))
+            .icon(if cx.theme().is_dark() {
+                Icon::empty().path("icons/sun.svg")
+            } else {
+                Icon::empty().path("icons/moon.svg")
+            })
             .on_click(cx.listener(move |_, _, _, cx| {
                 let current = cx.theme().mode;
                 let next = if current.is_dark() {
@@ -118,7 +122,7 @@ impl Render for AppView {
                         )
                         .child(
                             SidebarMenuItem::new("Packets")
-                                .icon(Icon::empty().path("icons/telescope.svg"))
+                                .icon(Icon::empty().path("icons/radar.svg"))
                                 .active(active_id == PageId::Packets)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.active_page = PageId::Packets;
@@ -127,7 +131,7 @@ impl Render for AppView {
                         )
                         .child(
                             SidebarMenuItem::new("Settings")
-                                .icon(Icon::empty().path("icons/telescope.svg"))
+                                .icon(Icon::empty().path("icons/settings.svg"))
                                 .active(active_id == PageId::Settings)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.active_page = PageId::Settings;

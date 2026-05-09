@@ -1,24 +1,21 @@
-use std::rc::Rc;
-
 use crate::ui::components::packets::StateModel;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement;
-use gpui_component::{ActiveTheme, VirtualListScrollHandle};
 use reticulum::iface::RxMessage;
 
 pub struct PacketsPage {
-    size: Rc<Vec<Size<Pixels>>>,
-    scroll_handle: VirtualListScrollHandle,
+    w: Vec<Pixels>,
+    // size: Rc<Vec<Size<Pixels>>>,
+    scroll_handle: UniformListScrollHandle,
 }
 
 impl PacketsPage {
     pub fn new() -> Self {
-        let items = (0..5000).map(|i| format!("Item {}", i)).collect::<Vec<_>>();
-        let size = Rc::new(items.iter().map(|_| size(px(200.), px(28.))).collect());
-
+        //                      -Hops     -Dest     -Time    -Transport -Interface -etc
+        let column_widths = vec![px(60.), px(330.), px(330.), px(330.), px(150.), px(150.)];
         Self {
-            size,
-            scroll_handle: VirtualListScrollHandle::new(),
+            w: column_widths,
+            scroll_handle: UniformListScrollHandle::new(),
         }
     }
 }
@@ -28,107 +25,73 @@ impl Render for PacketsPage {
         let state_handle = cx.global::<StateModel>().inner.clone();
         let count = state_handle.read(cx).items.len();
 
+        let widths = self.w.clone();
+
+        // self.scroll_handle.scroll_to_item(ix, ScrollStrategy::Bottom);
+
         div()
             .size_full()
             .overflow_x_scrollbar()
-            .child(PacketsPage::render_header())
+            .child(PacketsPage::render_header(&self))
             .child(
                 uniform_list("packet-list", count, move |range, _window, cx| {
                     let state = state_handle.read(cx);
                     let items = &state.items;
 
+                    // let widths = self.w.clone();
                     range
                         .map(|ix| {
                             let item = &items[ix];
                             // item.packet.
 
                             // div().child(format!("hops: {}", item.packet.header.hops))
-                            div().child(PacketsPage::render_row(item))
+                            div().child(PacketsPage::render_row(item, &widths))
                         })
                         .collect::<Vec<_>>()
                 })
+                // .track_scroll(self.scroll_handle.clone())
                 .size_full(),
             )
     }
 }
 
+macro_rules! row_element {
+    ($width:expr, $item:expr) => {
+        div().w($width).pr_4().child(
+            div()
+                .w_full()
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child($item)
+                .text_right(),
+        )
+    };
+}
+
 impl PacketsPage {
-    fn render_row(item: &RxMessage) -> impl IntoElement {
+    #[rustfmt::skip]
+    fn render_row(item: &RxMessage, w: &Vec<Pixels>) -> impl IntoElement {
         div()
             .flex()
             .w_full()
             .border_b_1()
-            // .border_color(gpui::white())
-            .child(
-                div()
-                    .w_1_4()
-                    // .pl_2()
-                    .pr_4()
-                    .overflow_x_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(
-                        div()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(item.address.to_hex_string()),
-                    ),
-            )
-            .child(
-                div()
-                    .w_1_4()
-                    // .pl_2()
-                    .pr_4()
-                    .overflow_x_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(item.packet.destination.to_hex_string()),
-            )
-            .child(
-                div()
-                    .w_1_4()
-                    // .pl_2()
-                    .pr_4()
-                    .overflow_x_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(
-                        item.packet
-                            .transport
-                            .map_or("NONE".into(), |a| a.to_hex_string()),
-                    ),
-            )
-            .child(
-                // div()
-                //     .w_1_4()
-                //     // .pl_2()
-                //     .pr_4()
-                //     .whitespace_nowrap()
-                //     .overflow_x_hidden()
-                //     .text_ellipsis()
-                //     .child(format!("{}", item.packet.header.hops)),
-                div()
-                    .w_1_4()
-                    .pr_4() // This creates the "safe zone"
-                    .child(
-                        div() // This child handles the text behavior
-                            .w_full()
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(format!("{}", item.packet.header.hops)),
-                    ),
-            )
+            .child(row_element!(w[0], format!("{}", item.packet.header.hops)                                        ))
+            .child(row_element!(w[1], format!("{}", item.address.to_hex_string())                                   ))
+            .child(row_element!(w[2], format!("{}", item.packet.destination.to_hex_string())                        ))
+            .child(row_element!(w[3], format!("{}", item.packet.transport.map_or("-".into(), |a| a.to_hex_string()))))
+            // data last
     }
 
-    fn render_header() -> impl IntoElement {
+    fn render_header(&self) -> impl IntoElement {
         div()
             .flex()
             .w_full()
             .font_weight(gpui::FontWeight::BOLD)
-            .child(div().w_1_4().child("Interface"))
-            .child(div().w_1_4().child("Destination"))
-            .child(div().w_1_4().child("Transport"))
-            .child(div().w_1_4().child("Hops"))
+            // time - hops - dest - protocol - transport - interface
+            .child(div().w(*&self.w[0]).child("Hops"))
+            .child(div().w(*&self.w[1]).child("Destination"))
+            .child(div().w(*&self.w[2]).child("Interface"))
+            .child(div().w(*&self.w[3]).child("Transport"))
     }
 }
