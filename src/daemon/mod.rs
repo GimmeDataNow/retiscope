@@ -13,8 +13,7 @@ use reticulum::iface::RxMessage;
 use reticulum::transport::{Transport, TransportConfig};
 
 use crate::core::AnnounceData;
-use crate::db::config::DatabaseConfig;
-use crate::db::{DatabaseHandle, RetiscopeDB};
+use crate::db::DatabaseHandle;
 use crate::network::config::add_transport_routes;
 use crate::paths::AppPaths;
 
@@ -28,16 +27,8 @@ pub struct StreamBundle {
 #[instrument(skip(cancel, db))]
 pub async fn run(cancel: CancellationToken, db: DatabaseHandle) -> StreamBundle {
     info!("Daemon started");
+
     let app_paths = AppPaths::init();
-
-    // db
-    // let db = DatabaseConfig::load_database_config(app_paths.get_database_config_path())
-    //     .create_db()
-    //     .await
-    //     .expect("Failed to connect to the database");
-
-    // let _ = db.init_db().await;
-
     let db_handle = Arc::new(db);
     let db_for_batcher = db_handle.clone();
 

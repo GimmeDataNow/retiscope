@@ -9,6 +9,11 @@ enum PacketColumn {
     Destination,
     Interface,
     Transport,
+    Context,
+    DestinationType,
+    HeaderType,
+    PropagationType,
+    IfacFlag,
 }
 
 impl PacketColumn {
@@ -18,6 +23,11 @@ impl PacketColumn {
             Self::Destination => "Destination",
             Self::Interface => "Interface",
             Self::Transport => "Transport",
+            Self::Context => "Packet Context",
+            Self::DestinationType => "Destination Type",
+            Self::HeaderType => "Header Type",
+            Self::PropagationType => "Propagation Type",
+            Self::IfacFlag => "Ifac Flag",
         }
     }
 }
@@ -51,10 +61,26 @@ impl PacketsPage {
             column_order: vec![
                 PacketColumn::Hops,
                 PacketColumn::Destination,
+                PacketColumn::Context,
+                PacketColumn::DestinationType,
+                PacketColumn::HeaderType,
+                PacketColumn::PropagationType,
+                PacketColumn::IfacFlag,
                 PacketColumn::Interface,
                 PacketColumn::Transport,
             ],
-            column_widths: vec![px(60.), px(330.), px(330.), px(330.)],
+            column_widths: vec![
+                px(60.),  // hops
+                px(330.), // dest
+                px(330.), // context
+                px(120.), // dest type
+                px(120.), // header
+                px(120.), // prop type
+                px(150.), // ifac type
+                px(330.), // interface
+                px(330.), // transport
+            ],
+            // hops - dest - dest type - prop type - header type - ifac flag - context - interface - transport
             scroll_handle: UniformListScrollHandle::new(),
         }
     }
@@ -84,7 +110,8 @@ impl Render for PacketsPage {
 
         div()
             .size_full()
-            .overflow_x_scrollbar()
+            // .overflow_x_scrollbar()
+            .overflow_scrollbar()
             .child(self.render_header(cx))
             .child(
                 uniform_list("packet-list", count, move |range, _window, cx| {
@@ -155,12 +182,21 @@ impl PacketsPage {
             .children(order.into_iter().enumerate().map(|(idx, col)| {
                 let content = match col {
                     PacketColumn::Hops => format!("{}", item.packet.header.hops),
-                    PacketColumn::Destination => item.address.to_hex_string(),
-                    PacketColumn::Interface => item.packet.destination.to_hex_string(),
+                    PacketColumn::Interface => item.address.to_hex_string(),
+                    PacketColumn::Destination => item.packet.destination.to_hex_string(),
                     PacketColumn::Transport => item
                         .packet
                         .transport
                         .map_or("-".into(), |a| a.to_hex_string()),
+                    PacketColumn::Context => format!("{:?}", item.packet.context),
+                    PacketColumn::DestinationType => {
+                        format!("{:?}", item.packet.header.destination_type)
+                    }
+                    PacketColumn::HeaderType => format!("{:?}", item.packet.header.header_type),
+                    PacketColumn::PropagationType => {
+                        format!("{:?}", item.packet.header.propagation_type)
+                    }
+                    PacketColumn::IfacFlag => format!("{:?}", item.packet.header.ifac_flag),
                 };
                 row_element!(widths[idx], content)
             }))
