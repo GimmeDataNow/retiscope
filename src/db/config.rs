@@ -6,11 +6,11 @@ use crate::db::surrealdb;
 use crate::errors::RetiscopeError;
 use serde::Deserialize;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// Configuration settings for the Retiscope database layer.
 ///
-/// This struct holds the connection parameters and provider-specific options
+// the first
+/// This struct holds the conn.inspect_err(f)ection parameters and provider-specific options
 /// required to initialize the database backend. It is designed to be deserialized
 /// from configuration files (e.g., TOML).
 #[allow(dead_code)]
@@ -81,16 +81,14 @@ impl DatabaseConfig {
     /// read or the TOML is invalid, the function logs a warning
     /// and falls back to `DatabaseConfig::default()`.
     #[instrument]
-    pub fn load_database_config(path: PathBuf) -> DatabaseConfig {
+    pub fn load_database_config(path: PathBuf) -> Option<DatabaseConfig> {
         std::fs::read_to_string(&path)
+            .inspect_err(|_| warn!("Failed to read database file, database will be disabled",))
+            .ok()
             .and_then(|contents| {
                 toml::from_str::<DatabaseConfig>(&contents)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    .inspect_err(|_| error!("Failed to parse file"))
-            })
-            .unwrap_or_else(|_| {
-                warn!("Failed to read file, using defaults");
-                DatabaseConfig::default()
+                    .inspect_err(|_| error!("Failed to parse database config"))
+                    .ok()
             })
     }
 
@@ -106,7 +104,7 @@ impl DatabaseConfig {
     /// fails to connect or if the provided configuration parameters are invalid.
     #[allow(dead_code)]
     #[allow(unused_variables)]
-    pub async fn create_db(&self) -> Result<Arc<dyn RetiscopeDB>, RetiscopeError> {
+    pub async fn create_db(&self) -> Result<Box<dyn RetiscopeDB>, RetiscopeError> {
         match &self.database {
             DatabaseOptions::Surreal {
                 address,
@@ -118,7 +116,7 @@ impl DatabaseConfig {
                 let instance =
                     surrealdb::SurrealImpl::new(address, port, *use_tls, namespace, database)
                         .await?;
-                return Ok(Arc::new(instance));
+                return Ok(Box::new(instance));
             }
             DatabaseOptions::Postgres { connection_string } => {
                 todo!()

@@ -13,10 +13,12 @@ mod network;
 mod paths;
 mod ui;
 
+use crate::db::DatabaseHandle;
+
 #[tokio::main]
 async fn main() {
     // logging
-    let initial_filter = EnvFilter::new("retiscope=debug,reticulum=debug,surrealdb=error");
+    let initial_filter = EnvFilter::new("retiscope=info,reticulum=warn,surrealdb=error");
     let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
     tracing_subscriber::registry()
         .with(filter_layer)
@@ -30,7 +32,10 @@ async fn main() {
     match args.command {
         arguments::Commands::Daemon => {
             info!("Starting Retiscope Daemon");
-            let _stream = daemon::run(cancel_token.clone()).await;
+
+            let db = DatabaseHandle::create_and_configure().await;
+            let _stream = daemon::run(cancel_token.clone(), db).await;
+
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("Ctrl+C received, shutting down gracefully...");
@@ -42,11 +47,13 @@ async fn main() {
         }
         arguments::Commands::Gui => {
             info!("Starting Retiscope GUI...");
-            let bundle = daemon::run(cancel_token.clone()).await;
+
+            let db = DatabaseHandle::create_and_configure().await;
+            let bundle = daemon::run(cancel_token.clone(), db).await;
 
             ui::run(bundle);
-
             cancel_token.cancel();
+
             info!("GUI closed, cleaning up");
         }
         _ => {

@@ -14,6 +14,7 @@ use reticulum::transport::{Transport, TransportConfig};
 
 use crate::core::AnnounceData;
 use crate::db::config::DatabaseConfig;
+use crate::db::{DatabaseHandle, RetiscopeDB};
 use crate::network::config::add_transport_routes;
 use crate::paths::AppPaths;
 
@@ -24,18 +25,21 @@ pub struct StreamBundle {
 }
 
 #[allow(dead_code)]
-#[instrument(skip(cancel))]
-pub async fn run(cancel: CancellationToken) -> StreamBundle {
+#[instrument(skip(cancel, db))]
+pub async fn run(cancel: CancellationToken, db: DatabaseHandle) -> StreamBundle {
     info!("Daemon started");
     let app_paths = AppPaths::init();
 
     // db
-    let db = DatabaseConfig::load_database_config(app_paths.get_database_config_path())
-        .create_db()
-        .await
-        .expect("Failed to connect to the database");
+    // let db = DatabaseConfig::load_database_config(app_paths.get_database_config_path())
+    //     .create_db()
+    //     .await
+    //     .expect("Failed to connect to the database");
 
-    let _ = db.init_db().await;
+    // let _ = db.init_db().await;
+
+    let db_handle = Arc::new(db);
+    let db_for_batcher = db_handle.clone();
 
     // transport
     let mut transport_config = TransportConfig::new(
@@ -64,12 +68,19 @@ pub async fn run(cancel: CancellationToken) -> StreamBundle {
                     Some(data) = rx.recv() => {
                         batch.push(data);
                         if batch.len() >= 100 {
-                            let _ = db.save_announces(&mut batch).await;
+                            if let Some(db) = db_for_batcher.as_ref().load().as_ref() {
+                                let _ = db.save_announces(&mut batch).await;
+
+                            } else {
+                                batch.clear();
+                            }
                         }
                     }
                     _ = timer.tick() => {
                         if !batch.is_empty() {
-                            let _ = db.save_announces(&mut batch).await;
+                            if let Some(db) = db_for_batcher.as_ref().load().as_ref() {
+                                let _ = db.save_announces(&mut batch).await;
+                            }
                         }
                     }
                 }
