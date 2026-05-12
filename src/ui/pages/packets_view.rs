@@ -1,6 +1,7 @@
 use crate::ui::components::packets::StateModel;
 use gpui::prelude::FluentBuilder; // compiler complains without this
 use gpui::*;
+use gpui_component::Theme;
 use gpui_component::theme::ActiveTheme;
 use reticulum::iface::RxMessage;
 
@@ -64,8 +65,6 @@ impl PacketColumn {
     }
 }
 
-// ─── Drag payload ─────────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 struct DragColumn {
     from_index: usize,
@@ -73,7 +72,6 @@ struct DragColumn {
 
 impl Render for DragColumn {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // let colors = cx.theme().colors.clone();
         let theme = cx.theme();
         div()
             .px_3()
@@ -88,8 +86,6 @@ impl Render for DragColumn {
             .child("Moving column…")
     }
 }
-
-// ─── Column State ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct ColumnState {
@@ -107,45 +103,6 @@ impl ColumnState {
         }
     }
 }
-
-// ─── Theme snapshot for uniform_list rows ────────────────────────────────────
-
-/// A cheap, Clone-able snapshot of the theme tokens we need inside the
-/// `uniform_list` closure (which cannot hold a live `cx` reference).
-#[derive(Clone)]
-struct RowTheme {
-    background: Hsla,
-    table_even: Hsla,
-    table_hover: Hsla,
-    table_row_border: Hsla,
-    foreground: Hsla,
-    muted_foreground: Hsla,
-    muted: Hsla,
-    border: Hsla,
-    accent: Hsla,
-    radius: Pixels,
-}
-
-impl RowTheme {
-    fn from_cx(cx: &App) -> Self {
-        let theme = cx.theme();
-        let c = &theme.colors;
-        Self {
-            background: c.background,
-            table_even: c.table_even,
-            table_hover: c.table_hover,
-            table_row_border: c.table_row_border,
-            foreground: c.foreground,
-            muted_foreground: c.muted_foreground,
-            muted: c.muted,
-            border: c.border,
-            accent: c.accent,
-            radius: theme.radius,
-        }
-    }
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 pub struct PacketsPage {
     /// Ordered list of all columns (visible or not).
@@ -197,11 +154,6 @@ impl Render for PacketsPage {
             .map(|i| (self.columns[i].col, self.columns[i].width))
             .collect();
 
-        let row_theme = RowTheme::from_cx(cx);
-
-        // let colors = cx.theme().colors.clone();
-        // let mono = cx.theme().mono_font_family.clone();
-
         let theme = cx.theme();
 
         div()
@@ -216,16 +168,12 @@ impl Render for PacketsPage {
             .child(self.render_header(cx))
             .child(
                 uniform_list("packet-list", count, {
-                    // let visible = visible.clone();
-                    let row_theme = row_theme.clone();
                     move |range, _window, cx| {
-                        let state = state_handle.read(cx);
-                        let items = &state.items;
-                        let vis = visible.clone();
-                        let rt = row_theme.clone();
+                        let items = &state_handle.read(cx).items;
+                        let theme = cx.theme();
                         range
                             .map(|ix| {
-                                Self::render_row(&items[ix], &vis, ix, &rt).into_any_element()
+                                Self::render_row(&items[ix], &visible, ix, theme).into_any_element()
                             })
                             .collect::<Vec<_>>()
                     }
@@ -241,9 +189,7 @@ impl Render for PacketsPage {
 
 impl PacketsPage {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors.clone();
-        let radius = cx.theme().radius;
-        let picker_open = self.picker_open;
+        let theme = cx.theme();
 
         div()
             .flex()
@@ -252,15 +198,16 @@ impl PacketsPage {
             .px_3()
             .py_2()
             .border_b_1()
-            .border_color(colors.title_bar_border)
-            .bg(colors.title_bar)
+            .border_color(theme.colors.title_bar_border)
+            .bg(theme.colors.title_bar)
             .child(
                 div()
                     .text_xs()
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(colors.muted_foreground)
+                    .text_color(theme.colors.muted_foreground)
                     .child("PACKET MONITOR"),
             )
+            // .child() // packet viewer here. if you take the child from below and just use .absolute() then you can observe some of the desired behaviour
             .child(
                 div()
                     .id("col-picker-btn")
@@ -269,25 +216,25 @@ impl PacketsPage {
                     .gap_1()
                     .px_2()
                     .py_1()
-                    .rounded(radius)
+                    .rounded(theme.radius)
                     .cursor(CursorStyle::PointingHand)
-                    .bg(if picker_open {
-                        colors.accent
+                    .bg(if self.picker_open {
+                        theme.colors.accent
                     } else {
-                        colors.secondary
+                        theme.colors.secondary
                     })
                     .border_1()
-                    .border_color(if picker_open {
-                        colors.ring
+                    .border_color(if self.picker_open {
+                        theme.colors.ring
                     } else {
-                        colors.border
+                        theme.colors.border
                     })
-                    .hover(move |s| s.bg(colors.secondary_hover))
+                    .hover(move |s| s.bg(theme.colors.secondary_hover))
                     .text_xs()
-                    .text_color(if picker_open {
-                        colors.accent_foreground
+                    .text_color(if self.picker_open {
+                        theme.colors.accent_foreground
                     } else {
-                        colors.secondary_foreground
+                        theme.colors.secondary_foreground
                     })
                     .child("⊞ Columns")
                     .on_click(cx.listener(|this, _, _window, cx| {
@@ -298,14 +245,13 @@ impl PacketsPage {
     }
 
     fn render_column_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors.clone();
+        let colors = cx.theme().colors;
         let radius = cx.theme().radius;
 
         div()
             .absolute()
             .top(px(68.))
             .right(px(8.))
-            // .z_index(100)
             .w(px(200.))
             .rounded(radius)
             .bg(colors.popover)
@@ -325,70 +271,61 @@ impl PacketsPage {
                     .text_color(colors.muted_foreground)
                     .child("TOGGLE COLUMNS"),
             )
-            .children(
-                self.columns
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, col_state)| {
-                        let visible = col_state.visible;
-                        let label = col_state.col.label();
+            .children(self.columns.iter().enumerate().map(|(idx, col_state)| {
+                let visible = col_state.visible;
+                let label = col_state.col.label();
 
-                        let check_bg = if visible {
-                            colors.primary
-                        } else {
-                            colors.muted
-                        };
-                        let check_border = if visible {
-                            colors.primary
-                        } else {
-                            colors.border
-                        };
-                        let check_fg = colors.primary_foreground;
-                        let label_color = if visible {
-                            colors.popover_foreground
-                        } else {
-                            colors.muted_foreground
-                        };
-                        let hover_bg = colors.list_hover;
+                let check_bg = if visible {
+                    colors.primary
+                } else {
+                    colors.muted
+                };
+                let check_border = if visible {
+                    colors.primary
+                } else {
+                    colors.border
+                };
+                let check_fg = colors.primary_foreground;
+                let label_color = if visible {
+                    colors.popover_foreground
+                } else {
+                    colors.muted_foreground
+                };
+                let hover_bg = colors.list_hover;
 
+                div()
+                    .id(("picker-row", idx))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded(radius)
+                    .cursor(CursorStyle::PointingHand)
+                    .hover(move |s| s.bg(hover_bg))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        let visible_count = this.columns.iter().filter(|c| c.visible).count();
+                        if this.columns[idx].visible && visible_count <= 1 {
+                            return;
+                        }
+                        this.columns[idx].visible = !&this.columns[idx].visible;
+                        cx.notify();
+                    }))
+                    .child(
                         div()
-                            .id(("picker-row", idx))
+                            .w(px(14.))
+                            .h(px(14.))
+                            .rounded_sm()
+                            .border_1()
                             .flex()
                             .items_center()
-                            .gap_2()
-                            .px_2()
-                            .py_1()
-                            .rounded(radius)
-                            .cursor(CursorStyle::PointingHand)
-                            .hover(move |s| s.bg(hover_bg))
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                let visible_count =
-                                    this.columns.iter().filter(|c| c.visible).count();
-                                if this.columns[idx].visible && visible_count <= 1 {
-                                    return;
-                                }
-                                this.columns[idx].visible = !this.columns[idx].visible;
-                                cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .w(px(14.))
-                                    .h(px(14.))
-                                    .rounded_sm()
-                                    .border_1()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .border_color(check_border)
-                                    .bg(check_bg)
-                                    .when(visible, |el| {
-                                        el.text_color(check_fg).text_xs().child("✓")
-                                    }),
-                            )
-                            .child(div().text_sm().text_color(label_color).child(label))
-                    })
-                    .collect::<Vec<_>>(),
-            )
+                            .justify_center()
+                            .border_color(check_border)
+                            .bg(check_bg)
+                            .when(visible, |el| el.text_color(check_fg).text_xs().child("✓")),
+                    )
+                    .child(div().text_sm().text_color(label_color).child(label))
+            }))
             .child(
                 div()
                     .mt_1()
@@ -415,7 +352,7 @@ impl PacketsPage {
     }
 
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors.clone();
+        let theme = cx.theme();
         let visible_indices = self.visible_indices();
 
         div()
@@ -423,27 +360,22 @@ impl PacketsPage {
             .items_center()
             .px_2()
             .py_1()
-            .bg(colors.table_head)
+            .bg(theme.colors.table_head)
             .border_b_1()
-            .border_color(colors.border)
+            .border_color(theme.colors.border)
             .font_weight(FontWeight::SEMIBOLD)
             .text_xs()
-            .text_color(colors.table_head_foreground)
+            .text_color(theme.colors.table_head_foreground)
             .children(
                 visible_indices
                     .into_iter()
                     .enumerate()
                     .map(|(visual_pos, real_idx)| {
                         let col = &self.columns[real_idx];
-                        let width = col.width;
-                        let label = col.col.label();
-
-                        let grip_color = colors.muted_foreground;
-                        let grip_hover = colors.accent;
 
                         div()
                             .id(("col-header", real_idx))
-                            .w(width)
+                            .w(col.width)
                             .flex_shrink_0()
                             .flex()
                             .items_center()
@@ -451,8 +383,8 @@ impl PacketsPage {
                             .pr_3()
                             .child(
                                 div()
-                                    .text_color(grip_color)
-                                    .hover(move |s| s.text_color(grip_hover))
+                                    .text_color(theme.colors.muted_foreground)
+                                    .hover(move |s| s.text_color(theme.colors.accent))
                                     .cursor(CursorStyle::ClosedHand)
                                     .child("⠿"),
                             )
@@ -461,7 +393,7 @@ impl PacketsPage {
                                     .whitespace_nowrap()
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(label),
+                                    .child(col.col.label()),
                             )
                             .on_drag(
                                 DragColumn {
@@ -472,30 +404,27 @@ impl PacketsPage {
                             .on_drop(cx.listener(move |this, dragged: &DragColumn, _window, cx| {
                                 let vis = this.visible_indices();
                                 let from_vis = dragged.from_index;
-                                let to_vis = visual_pos;
-                                if from_vis == to_vis {
+                                // let visual_pos = visual_pos;
+                                if from_vis == visual_pos {
                                     return;
                                 }
-                                if from_vis < vis.len() && to_vis < vis.len() {
-                                    let from_real = vis[from_vis];
-                                    let to_real = vis[to_vis];
+                                if dragged.from_index < vis.len() && visual_pos < vis.len() {
+                                    let from_real = vis[dragged.from_index];
+                                    let to_real = vis[visual_pos];
                                     let col = this.columns.remove(from_real);
                                     this.columns.insert(to_real, col);
                                     cx.notify();
                                 }
                             }))
-                    })
-                    .collect::<Vec<_>>(),
+                    }),
             )
     }
-
-    // ── Data Row ──────────────────────────────────────────────────────────────
 
     fn render_row(
         item: &RxMessage,
         visible: &[(PacketColumn, Pixels)],
         row_index: usize,
-        theme: &RowTheme,
+        theme: &Theme,
     ) -> impl IntoElement {
         let is_even = row_index % 2 == 0;
         let row_bg = if is_even {
@@ -516,6 +445,7 @@ impl PacketsPage {
             .bg(row_bg)
             .hover(move |s| s.bg(hover_bg))
             .children(visible.iter().map(|(col, width)| {
+                // it might be good to extract this into a function (maybe)
                 let content = match col {
                     PacketColumn::Hops => format!("{}", item.packet.header.hops),
                     PacketColumn::Interface => item.address.to_hex_string(),
@@ -523,7 +453,7 @@ impl PacketsPage {
                     PacketColumn::Transport => item
                         .packet
                         .transport
-                        .map_or("—".into(), |a| a.to_hex_string()),
+                        .map_or("—".into(), |a| a.to_hex_string()), // em dash looks much better than the minus
                     PacketColumn::Context => format!("{:?}", item.packet.context),
                     PacketColumn::DestinationType => {
                         format!("{:?}", item.packet.header.destination_type)
@@ -538,57 +468,41 @@ impl PacketsPage {
                 let is_badge = col.is_badge();
                 let is_hex = col.is_hex();
 
-                // Copy out scalars so closures (if any) don't borrow `theme`.
-                let muted = theme.muted;
-                let border = theme.border;
-                let muted_fg = theme.muted_foreground;
-                let accent = theme.accent;
-                let foreground = theme.foreground;
-                let radius = theme.radius;
-
-                div()
-                    .w(*width)
-                    .flex_shrink_0()
-                    .pr_3()
-                    .child(if is_badge {
-                        // Enum fields → pill badge using muted tokens
-                        div()
-                            .items_center()
-                            .px_2()
-                            .py_px()
-                            .rounded(radius)
-                            .bg(muted)
-                            .border_1()
-                            .border_color(border)
-                            .text_xs()
-                            .text_color(muted_fg)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(content)
-                            .into_any_element()
-                    } else if is_hex {
-                        // Hex addresses → accent colour (maybe muted_fg is better)
-                        div()
-                            .text_color(muted_fg)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(content)
-                            .into_any_element()
-                    } else {
-                        // Plain values
-                        div()
-                            .text_color(muted_fg)
-                            .font_weight(FontWeight::MEDIUM)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(content)
-                            .text_right()
-                            .into_any_element()
-                    })
-                    .into_any_element()
+                div().w(*width).flex_shrink_0().pr_3().child(if is_badge {
+                    // Enum fields → pill badge using muted tokens
+                    div()
+                        .items_center()
+                        .px_2()
+                        .py_px()
+                        .rounded(theme.radius)
+                        .bg(theme.muted)
+                        .border_1()
+                        .border_color(theme.border)
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(content)
+                } else if is_hex {
+                    // Hex addresses → accent colour (maybe muted_fg is better)
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(content)
+                } else {
+                    // Plain values
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .font_weight(FontWeight::MEDIUM)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(content)
+                        .text_right()
+                })
             }))
     }
 }
