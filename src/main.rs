@@ -18,7 +18,7 @@ use crate::db::DatabaseHandle;
 #[tokio::main]
 async fn main() {
     // logging
-    let initial_filter = EnvFilter::new("retiscope=info,reticulum=warn,surrealdb=error");
+    let initial_filter = EnvFilter::new("retiscope=info,reticulum=info,surrealdb=error");
     let (filter_layer, _reload_handle) = reload::Layer::new(initial_filter);
     tracing_subscriber::registry()
         .with(filter_layer)
