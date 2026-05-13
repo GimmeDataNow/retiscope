@@ -353,6 +353,7 @@ impl PacketsPage {
 
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let colors = theme.colors;
         let visible_indices = self.visible_indices();
 
         div()
@@ -360,12 +361,12 @@ impl PacketsPage {
             .items_center()
             .px_2()
             .py_1()
-            .bg(theme.colors.table_head)
+            .bg(colors.table_head)
             .border_b_1()
-            .border_color(theme.colors.border)
+            .border_color(colors.border)
             .font_weight(FontWeight::SEMIBOLD)
             .text_xs()
-            .text_color(theme.colors.table_head_foreground)
+            .text_color(colors.table_head_foreground)
             .children(
                 visible_indices
                     .into_iter()
@@ -383,8 +384,8 @@ impl PacketsPage {
                             .pr_3()
                             .child(
                                 div()
-                                    .text_color(theme.colors.muted_foreground)
-                                    .hover(move |s| s.text_color(theme.colors.accent))
+                                    .text_color(colors.muted_foreground)
+                                    .hover(move |s| s.text_color(colors.accent))
                                     .cursor(CursorStyle::ClosedHand)
                                     .child("⠿"),
                             )
@@ -469,7 +470,7 @@ impl PacketsPage {
                 let is_hex = col.is_hex();
 
                 div().w(*width).flex_shrink_0().pr_3().child(if is_badge {
-                    // Enum fields → pill badge using muted tokens
+                    // Enum fields → pill badge
                     div()
                         .items_center()
                         .px_2()
