@@ -72,22 +72,37 @@ impl PacketColumn {
 #[derive(Clone)]
 struct DragColumn {
     from_index: usize,
+    label: &'static str,
+    width: Pixels,
 }
 
 impl Render for DragColumn {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let colors = theme.colors;
         div()
-            .px_3()
+            .w(self.width)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
             .py_1()
-            .rounded(theme.radius)
-            .bg(theme.popover)
+            .bg(colors.table_head)
             .border_1()
-            .border_color(theme.drag_border)
+            .border_color(colors.border)
             .shadow_lg()
-            .text_sm()
-            .text_color(theme.popover_foreground)
-            .child("Moving column…")
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_xs()
+            .text_color(colors.table_head_foreground)
+            .child(div().text_color(colors.muted_foreground).child("⠿"))
+            .child(
+                div()
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(self.label),
+            )
     }
 }
 
@@ -384,6 +399,7 @@ impl PacketsPage {
                     .enumerate()
                     .map(|(visual_pos, real_idx)| {
                         let col = &self.columns[real_idx];
+                        let col_label = col.col.label();
 
                         div()
                             .id(("col-header", real_idx))
@@ -410,6 +426,8 @@ impl PacketsPage {
                             .on_drag(
                                 DragColumn {
                                     from_index: visual_pos,
+                                    label: col_label,
+                                    width: col.width,
                                 },
                                 |drag, _point, _window, cx| cx.new(|_| drag.clone()),
                             )

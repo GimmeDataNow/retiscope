@@ -25,6 +25,8 @@ pub struct FormattedPacket {
     pub header_type: SharedString,
     pub propagation_type: SharedString,
     pub ifac_flag: SharedString,
+
+    pub raw_packet: RxMessage,
 }
 
 impl FormattedPacket {
@@ -43,6 +45,7 @@ impl FormattedPacket {
             header_type: fmt_static_header_type(&msg.packet.header.header_type),
             propagation_type: fmt_static_propagation_type(&msg.packet.header.propagation_type),
             ifac_flag: fmt_static_ifac_flag(&msg.packet.header.ifac_flag),
+            raw_packet: *msg,
         }
     }
 }
