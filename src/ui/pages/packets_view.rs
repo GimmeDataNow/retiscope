@@ -4,6 +4,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::ui::components::packets::FormattedPacket;
 use crate::ui::components::packets::StateModel;
 
+use reticulum::iface::RxMessage;
+
 use gpui::prelude::FluentBuilder; // compiler complains without this
 use gpui::*;
 use gpui_component::Theme;
@@ -106,8 +108,17 @@ impl Render for DragColumn {
     }
 }
 
+/// Drag state for resizing the inspector panel.
 #[derive(Clone)]
-struct ColumnState {
+struct InspectorResize {}
+
+impl Render for InspectorResize {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().size_0()
+    }
+}
+
+pub struct ColumnState {
     col: PacketColumn,
     width: Pixels,
     visible: bool,
@@ -130,7 +141,12 @@ pub struct PacketsPage {
     /// Whether the column-picker popover is open.
     picker_open: bool,
 
-    packet_inspector_open: bool,
+    /// The packet currently selected for inspection.
+    packet: Option<RxMessage>,
+    /// Height of the inspector panel in pixels.
+    inspector_height: Pixels,
+    /// Mouse Y captured at the start of a resize drag.
+    resize_drag_start: Option<(Pixels, Pixels)>, // (mouse_y, height_at_start)
 }
 
 impl PacketsPage {
@@ -149,7 +165,9 @@ impl PacketsPage {
             ],
             scroll_handle: UniformListScrollHandle::new(),
             picker_open: false,
-            packet_inspector_open: false,
+            packet: None,
+            inspector_height: px(200.),
+            resize_drag_start: None,
         }
     }
 
@@ -178,6 +196,9 @@ impl Render for PacketsPage {
 
         let theme = cx.theme();
 
+        let has_packet = self.packet.is_some();
+        let weak = cx.weak_entity();
+
         div()
             .size_full()
             .flex()
@@ -196,20 +217,30 @@ impl Render for PacketsPage {
                         let theme = cx.theme();
                         let result = range
                             .map(|ix| {
-                                Self::render_row(&items[ix], &visible, ix, theme).into_any_element()
+                                let item = items[ix].clone();
+                                let weak = weak.clone();
+                                let raw = item.raw_packet.clone();
+                                Self::render_row(&item, &visible, ix, theme, move |_, _, cx| {
+                                    weak.update(cx, |this, cx| {
+                                        this.packet = Some(raw.clone());
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                })
+                                .into_any_element()
                             })
                             .collect::<Vec<_>>();
 
                         result
                     }
                 })
-                // .line_height(px(28.))
                 .track_scroll(self.scroll_handle.clone())
                 .flex_1(),
             )
             .when(self.picker_open, |el| {
                 el.child(self.render_column_picker(cx))
             })
+            .when(has_packet, |el| el.child(self.render_inspector(cx)))
     }
 }
 
@@ -233,7 +264,6 @@ impl PacketsPage {
                     .text_color(theme.colors.muted_foreground)
                     .child("PACKET MONITOR"),
             )
-            // .child() // packet viewer here. if you take the child from below and just use .absolute() then you can observe some of the desired behaviour
             .child(
                 div()
                     .id("col-picker-btn")
@@ -455,6 +485,7 @@ impl PacketsPage {
         visible: &[(PacketColumn, Pixels)],
         row_index: usize,
         theme: &Theme,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> impl IntoElement {
         let is_even = row_index % 2 == 0;
         let row_bg = if is_even {
@@ -466,6 +497,8 @@ impl PacketsPage {
         let border_color = theme.table_row_border;
 
         div()
+            .w_full()
+            .id(("packet-row", row_index))
             .flex()
             .items_center()
             .px_2()
@@ -474,8 +507,9 @@ impl PacketsPage {
             .border_color(border_color)
             .bg(row_bg)
             .hover(move |s| s.bg(hover_bg))
+            .cursor(CursorStyle::PointingHand)
+            .on_click(on_click)
             .children(visible.iter().map(|(col, width)| {
-                // it might be good to extract this into a function (maybe)
                 let content = match col {
                     PacketColumn::Hops => item.hops.clone(),
                     PacketColumn::Interface => item.interface.clone(),
@@ -491,8 +525,7 @@ impl PacketsPage {
                 let is_badge = col.is_badge();
                 let is_hex = col.is_hex();
 
-                div().w(*width).flex_shrink_0().pr_3().child(if is_badge {
-                    // Enum fields → pill badge
+                div().w(*width).pr_3().child(if is_badge {
                     div()
                         .items_center()
                         .px_2()
@@ -508,7 +541,6 @@ impl PacketsPage {
                         .text_ellipsis()
                         .child(content)
                 } else if is_hex {
-                    // Hex addresses → accent colour (maybe muted_fg is better)
                     div()
                         .text_color(theme.muted_foreground)
                         .whitespace_nowrap()
@@ -516,7 +548,6 @@ impl PacketsPage {
                         .text_ellipsis()
                         .child(content)
                 } else {
-                    // Plain values
                     div()
                         .text_color(theme.muted_foreground)
                         .font_weight(FontWeight::MEDIUM)
@@ -527,5 +558,105 @@ impl PacketsPage {
                         .text_right()
                 })
             }))
+    }
+
+    fn render_inspector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let colors = theme.colors;
+        let height = self.inspector_height;
+        let address_str = self
+            .packet
+            .as_ref()
+            .map(|p| p.address.to_hex_string())
+            .unwrap_or_default();
+
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .h(height)
+            .border_t_1()
+            .border_color(colors.border)
+            .child(
+                // resize handle
+                div()
+                    .id("inspector-resize-handle")
+                    .w_full()
+                    .h(px(4.))
+                    .bg(colors.border)
+                    .cursor(CursorStyle::ResizeRow)
+                    .hover(|s| s.bg(colors.ring))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, e: &MouseDownEvent, _window, cx| {
+                            this.resize_drag_start = Some((e.position.y, this.inspector_height));
+                            cx.notify();
+                        }),
+                    )
+                    .on_drag(InspectorResize {}, |drag, _point, _window, cx| {
+                        cx.new(|_| drag.clone())
+                    })
+                    .on_drag_move(cx.listener(
+                        |this, e: &DragMoveEvent<InspectorResize>, _window, cx| {
+                            if let Some((start_y, start_height)) = this.resize_drag_start {
+                                let delta = e.event.position.y - start_y;
+                                let new_height = (start_height - delta).max(px(80.)).min(px(600.));
+                                this.inspector_height = new_height;
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _e, _window, cx| {
+                            this.resize_drag_start = None;
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .child(
+                // title bar
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_1()
+                    .bg(colors.title_bar)
+                    .border_b_1()
+                    .border_color(colors.title_bar_border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(colors.muted_foreground)
+                            .child("PACKET INSPECTOR"),
+                    )
+                    .child(
+                        div()
+                            .id("inspector-close")
+                            .text_xs()
+                            .text_color(colors.muted_foreground)
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|s| s.text_color(colors.foreground))
+                            .child("✕")
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.packet = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                // packet
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .px_3()
+                    .py_2()
+                    .text_xs()
+                    .font_family(&theme.mono_font_family)
+                    .text_color(colors.muted_foreground)
+                    .child(address_str),
+            )
     }
 }
