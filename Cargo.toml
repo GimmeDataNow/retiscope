@@ -3,6 +3,12 @@ name = "retiscope"
 version = "0.1.0"
 edition = "2024"
 
+[profile.dev]
+opt-level = 1          # minimal optimisation, keeps debug symbols
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 strip = true
 opt-level = "s"

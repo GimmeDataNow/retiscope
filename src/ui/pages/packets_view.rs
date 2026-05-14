@@ -1,9 +1,13 @@
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
+use crate::ui::components::packets::FormattedPacket;
 use crate::ui::components::packets::StateModel;
+
 use gpui::prelude::FluentBuilder; // compiler complains without this
 use gpui::*;
 use gpui_component::Theme;
 use gpui_component::theme::ActiveTheme;
-use reticulum::iface::RxMessage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum PacketColumn {
@@ -110,6 +114,8 @@ pub struct PacketsPage {
     scroll_handle: UniformListScrollHandle,
     /// Whether the column-picker popover is open.
     picker_open: bool,
+
+    packet_inspector_open: bool,
 }
 
 impl PacketsPage {
@@ -128,6 +134,7 @@ impl PacketsPage {
             ],
             scroll_handle: UniformListScrollHandle::new(),
             picker_open: false,
+            packet_inspector_open: false,
         }
     }
 
@@ -170,14 +177,18 @@ impl Render for PacketsPage {
                 uniform_list("packet-list", count, {
                     move |range, _window, cx| {
                         let items = &state_handle.read(cx).items;
+
                         let theme = cx.theme();
-                        range
+                        let result = range
                             .map(|ix| {
                                 Self::render_row(&items[ix], &visible, ix, theme).into_any_element()
                             })
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+
+                        result
                     }
                 })
+                // .line_height(px(28.))
                 .track_scroll(self.scroll_handle.clone())
                 .flex_1(),
             )
@@ -422,7 +433,7 @@ impl PacketsPage {
     }
 
     fn render_row(
-        item: &RxMessage,
+        item: &FormattedPacket,
         visible: &[(PacketColumn, Pixels)],
         row_index: usize,
         theme: &Theme,
@@ -448,22 +459,15 @@ impl PacketsPage {
             .children(visible.iter().map(|(col, width)| {
                 // it might be good to extract this into a function (maybe)
                 let content = match col {
-                    PacketColumn::Hops => format!("{}", item.packet.header.hops),
-                    PacketColumn::Interface => item.address.to_hex_string(),
-                    PacketColumn::Destination => item.packet.destination.to_hex_string(),
-                    PacketColumn::Transport => item
-                        .packet
-                        .transport
-                        .map_or("—".into(), |a| a.to_hex_string()), // em dash looks much better than the minus
-                    PacketColumn::Context => format!("{:?}", item.packet.context),
-                    PacketColumn::DestinationType => {
-                        format!("{:?}", item.packet.header.destination_type)
-                    }
-                    PacketColumn::HeaderType => format!("{:?}", item.packet.header.header_type),
-                    PacketColumn::PropagationType => {
-                        format!("{:?}", item.packet.header.propagation_type)
-                    }
-                    PacketColumn::IfacFlag => format!("{:?}", item.packet.header.ifac_flag),
+                    PacketColumn::Hops => item.hops.clone(),
+                    PacketColumn::Interface => item.interface.clone(),
+                    PacketColumn::Destination => item.destination.clone(),
+                    PacketColumn::Transport => item.transport.clone(),
+                    PacketColumn::Context => item.context.clone(),
+                    PacketColumn::DestinationType => item.destination_type.clone(),
+                    PacketColumn::HeaderType => item.header_type.clone(),
+                    PacketColumn::PropagationType => item.propagation_type.clone(),
+                    PacketColumn::IfacFlag => item.ifac_flag.clone(),
                 };
 
                 let is_badge = col.is_badge();

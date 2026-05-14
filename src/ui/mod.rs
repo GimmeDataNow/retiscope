@@ -1,3 +1,6 @@
+#[allow(unused_imports)]
+use tracing::{debug, error, info, instrument, trace, warn};
+
 pub mod app_view;
 pub mod components;
 pub mod pages;
