@@ -24,6 +24,7 @@ pub struct FormattedPacket {
     pub destination_type: SharedString,
     pub header_type: SharedString,
     pub propagation_type: SharedString,
+    pub packet_type: SharedString,
     pub ifac_flag: SharedString,
 
     pub raw_packet: RxMessage,
@@ -44,6 +45,7 @@ impl FormattedPacket {
             destination_type: fmt_static_destination_type(&msg.packet.header.destination_type),
             header_type: fmt_static_header_type(&msg.packet.header.header_type),
             propagation_type: fmt_static_propagation_type(&msg.packet.header.propagation_type),
+            packet_type: fmt_static_packet_type(&msg.packet.header.packet_type),
             ifac_flag: fmt_static_ifac_flag(&msg.packet.header.ifac_flag),
             raw_packet: *msg,
         }
@@ -111,6 +113,16 @@ fn fmt_static_ifac_flag(v: &reticulum::packet::IfacFlag) -> SharedString {
     SharedString::from(match v {
         IfacFlag::Open => "Open",
         IfacFlag::Authenticated => "Authenticated",
+    })
+}
+
+fn fmt_static_packet_type(v: &reticulum::packet::PacketType) -> SharedString {
+    use reticulum::packet::PacketType;
+    SharedString::from(match v {
+        PacketType::Announce => "Announce",
+        PacketType::Data => "Data",
+        PacketType::LinkRequest => "LinkRequest",
+        PacketType::Proof => "Proof",
     })
 }
 

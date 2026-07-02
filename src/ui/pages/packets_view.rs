@@ -21,6 +21,7 @@ enum PacketColumn {
     DestinationType,
     HeaderType,
     PropagationType,
+    PacketType,
     IfacFlag,
 }
 
@@ -35,6 +36,7 @@ impl PacketColumn {
             Self::DestinationType => "Dest Type",
             Self::HeaderType => "Header",
             Self::PropagationType => "Propagation",
+            Self::PacketType => "Packet Type",
             Self::IfacFlag => "Ifac Flag",
         }
     }
@@ -49,6 +51,7 @@ impl PacketColumn {
             Self::DestinationType => px(110.),
             Self::HeaderType => px(100.),
             Self::PropagationType => px(110.),
+            Self::PacketType => px(110.),
             Self::IfacFlag => px(90.),
         }
     }
@@ -62,6 +65,7 @@ impl PacketColumn {
                 | Self::HeaderType
                 | Self::PropagationType
                 | Self::IfacFlag
+                | Self::PacketType
         )
     }
 
@@ -155,6 +159,7 @@ impl PacketsPage {
             columns: vec![
                 ColumnState::new(PacketColumn::Hops),
                 ColumnState::new(PacketColumn::Destination),
+                ColumnState::new(PacketColumn::PacketType),
                 ColumnState::new(PacketColumn::Context),
                 ColumnState::new(PacketColumn::DestinationType),
                 ColumnState::new(PacketColumn::HeaderType),
@@ -519,6 +524,7 @@ impl PacketsPage {
                     PacketColumn::DestinationType => item.destination_type.clone(),
                     PacketColumn::HeaderType => item.header_type.clone(),
                     PacketColumn::PropagationType => item.propagation_type.clone(),
+                    PacketColumn::PacketType => item.packet_type.clone(),
                     PacketColumn::IfacFlag => item.ifac_flag.clone(),
                 };
 
@@ -564,10 +570,11 @@ impl PacketsPage {
         let theme = cx.theme();
         let colors = theme.colors;
         let height = self.inspector_height;
+        // self.packet.as_ref().map(f)
         let address_str = self
             .packet
             .as_ref()
-            .map(|p| p.address.to_hex_string())
+            .map(|p| p.packet.destination.to_hex_string())
             .unwrap_or_default();
 
         div()

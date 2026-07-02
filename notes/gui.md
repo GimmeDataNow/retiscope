@@ -13,6 +13,7 @@
     - [ ] Announce stream destination
     - [ ] Active Links destination
   - [ ] Server inspection
+    - [x] Live Packet View
     - [ ] Announce stream
     - [ ] Log streaming
     - [ ] Active/known links

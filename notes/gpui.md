@@ -1,3 +1,7 @@
+# potential crates of interest
+gpui_tokio_bridge
+keyring
+
 ```rust
 struct AppSettings {
     pub theme_name: String,
